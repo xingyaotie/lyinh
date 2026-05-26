@@ -1,1 +1,1 @@
-1.01修复了一些错误：读者端的管理文件缺少。
+1.01 wobuxingle  zhegeshadongxi,laozicaonimade,woyongzhegejiushipaibei zhicai
