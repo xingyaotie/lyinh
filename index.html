@@ -403,7 +403,7 @@
     function showGiftDetail(seriesName, grade, cost) {
         currentGiftSeries = { seriesName, grade, cost };
         const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade)
-            .sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0))));
+            .sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0)));
         const firstBook = seriesBooks[0];
         const author = firstBook?.author || '';
         const notes = firstBook?.notes || '';
@@ -483,7 +483,7 @@
     // ========== 读者端核心借阅逻辑 ==========
     function showSeriesDetail(seriesName, grade) {
         const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade)
-            .sort((a,b) => (parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0))));
+            .sort((a,b) => (parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)));
         const firstBook = seriesBooks[0];
         const author = firstBook?.author || '';
         const notes = firstBook?.notes || '';
@@ -835,7 +835,7 @@
     }
 
     function showSeriesEdit(seriesName, grade) {
-        const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade).sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0))));
+        const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade).sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0)));
         const firstBook = seriesBooks[0]; const author = firstBook.author || ''; const notes = firstBook.notes || '';
         const isGift = grade.startsWith('gift-');
         const gradeNames = { 'A': 'A级', 'B': 'B级', 'C': 'C级', 'care': '爱护', 'gift-A': '1级赠品', 'gift-B': '2级赠品', 'gift-C': '3级赠品' };
