@@ -294,7 +294,14 @@
 
     function logout() { if(realtimeChannel) supabase.removeChannel(realtimeChannel); realtimeChannel = null; clearSession(); currentUser = null; booksData = []; reservationsData = []; hideAll(); fcoinDisplay.style.display = 'none'; }
 
-    async function autoLogin() { if(!initSupabase()) return; const session = loadSession(); if(!session) return; const { data: users } = await supabase.from('app_users').select('*').eq('username', session.username).limit(1); if(users?.length && users[0].role === session.role) { await loadSiteStatus(); if (users[0].role === 'reader' && siteStatus !== 'running') { loginWrapper.style.opacity='1'; return; } handleLoginImmediate(users[0].username, users[0].role, users[0].display_name); } else clearSession(); }
+    async function autoLogin() {
+    if(!initSupabase()) return;
+    // 无论是否自动登录，都先根据数据库状态刷新登录页 UI
+    await loadSiteStatus();
+    const session = loadSession();
+    if(!session) return; // 无 session 则停留在登录页，但此时背景/提示已正确
+    // ... 后面保持原样
+}
 
     document.addEventListener('keydown', e => { if(e.key==='Escape') { if(generalOverlay.classList.contains('show')) generalOverlay.classList.remove('show'); else if(announceOverlay.classList.contains('show')) btnCloseAnnounce.click(); else if(adminSuccessOverlay.classList.contains('show')) btnCloseAdminSuccess.click(); } });
     window.addEventListener('load', autoLogin);
