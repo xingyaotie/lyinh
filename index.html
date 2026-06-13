@@ -1,4 +1,395 @@
-// ========== 第二部分代码，从拼接点之后继续 ==========
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lyinh书城 · 借阅平台</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root {
+            --deep-blue: #0a2540; --card-bg: #ffffff; --text-primary: #1a1a1a;
+            --text-secondary: #5f6b7a; --accent: #0a2540; --input-bg: #f5f7fa;
+            --input-border: #dce1e8; --shadow: 0 12px 40px rgba(0,0,0,0.08);
+            --error: #c0392b; --grade-a: #b8860b; --grade-b: #2e5a88;
+            --grade-c: #1e7a5e; --care: #b85450; --gift-a: #8e44ad;
+            --gift-b: #2980b9; --gift-c: #16a085; --warning: #e67e22;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            width:100vw; height:100vh; overflow:hidden;
+            background: linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%);
+            display:flex; align-items:center; justify-content:center;
+            user-select:none; -webkit-user-select:none;
+        }
+        .brand-logo { position:fixed; top:24px; left:32px; font-size:1.8em; font-weight:700; color:#fff; z-index:20; }
+        .login-wrapper { position:relative; width:100%; max-width:440px; padding:20px; margin-top:-60px; }
+        .login-card { background:var(--card-bg); border-radius:16px; padding:48px 40px 40px; box-shadow:var(--shadow); position:relative; }
+        .login-card::before { content:''; position:absolute; top:0; left:40px; right:40px; height:3px; background:var(--deep-blue); border-radius:0 0 2px 2px; }
+        .brand-title { text-align:center; font-size:2em; font-weight:700; color:var(--deep-blue); }
+        .brand-subtitle { text-align:center; font-size:0.9em; color:var(--text-secondary); margin-bottom:32px; }
+        .divider { display:flex; align-items:center; margin:0 0 28px; gap:12px; }
+        .divider::before,.divider::after { content:''; flex:1; height:1px; background:#e4e9f0; }
+        .form-group { margin-bottom:20px; }
+        .form-label { display:block; font-size:0.85em; color:var(--text-secondary); margin-bottom:6px; }
+        .input-container { position:relative; display:flex; align-items:center; }
+        .input-icon { position:absolute; left:14px; font-size:1.1em; color:#8f9bb3; }
+        .form-input { width:100%; padding:14px 16px 14px 44px; font-size:0.95em; background:var(--input-bg); border:1px solid var(--input-border); border-radius:10px; color:var(--text-primary); outline:none; }
+        .form-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(10,37,64,0.1); background:#fff; }
+        .btn-login { width:100%; padding:15px; font-weight:600; background:var(--deep-blue); color:#fff; border:none; border-radius:10px; cursor:pointer; }
+        .btn-login:hover { background:#1e3a5f; }
+        .error-message { text-align:center; color:var(--error); font-size:0.85em; min-height:22px; }
+        .footer-note { text-align:center; margin-top:24px; font-size:0.8em; color:#8f9bb3; }
+
+        .overlay { position:fixed; inset:0; z-index:100; background:rgba(10,37,64,0.9); display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.5s; }
+        .overlay.show { opacity:1; pointer-events:all; }
+        .overlay-card { background:#fff; border-radius:16px; padding:36px; text-align:center; box-shadow:0 24px 64px rgba(0,0,0,0.2); max-width:440px; width:90%; animation:popIn 0.5s ease; }
+        @keyframes popIn { 0%{transform:scale(0.8);opacity:0;} 100%{transform:scale(1);opacity:1;} }
+
+        .content-area { position:fixed; top:0; left:0; width:100%; height:100%; z-index:50; background:linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%); overflow-y:auto; display:none; padding:20px; }
+        .content-area.show { display:block; }
+        .content-container { max-width:820px; margin:80px auto 40px; background:#fff; border-radius:16px; box-shadow:0 12px 40px rgba(0,0,0,0.08); padding:36px 30px; }
+        .content-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+        .header-left { display:flex; align-items:center; gap:12px; }
+        .btn-mail { position:relative; background:transparent; border:1px solid #dce1e8; color:var(--text-secondary); padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.9em; }
+        .btn-mail .mail-dot { position:absolute; top:-4px; right:-4px; width:10px; height:10px; background:#e74c3c; border-radius:50%; display:none; animation:blink 1s infinite; }
+        .btn-mail .mail-dot.show { display:block; }
+        .settings-wrapper { position:relative; }
+        .btn-settings { background:transparent; border:1px solid #dce1e8; color:var(--text-secondary); padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.9em; }
+        .settings-dropdown { position:absolute; right:0; top:120%; background:#fff; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.1); min-width:160px; display:none; z-index:5; }
+        .settings-dropdown.show { display:block; }
+        .settings-dropdown button { display:block; width:100%; padding:10px 16px; background:transparent; border:none; text-align:left; cursor:pointer; }
+        .settings-dropdown button:hover { background:#f5f7fa; }
+
+        .announcement-scroll { background:#f0f4ff; border-left:4px solid var(--deep-blue); padding:12px 16px; border-radius:8px; margin-bottom:24px; overflow:hidden; font-size:0.95em; color:var(--deep-blue); position:relative; height:40px; display:flex; align-items:center; }
+        .scroll-text { position:absolute; white-space:nowrap; will-change:transform; }
+
+        .tabs { display:flex; gap:12px; margin-bottom:20px; }
+        .tab-btn { padding:10px 24px; border:2px solid var(--deep-blue); color:var(--deep-blue); background:transparent; border-radius:10px; font-weight:600; cursor:pointer; }
+        .tab-btn.active { background:var(--deep-blue); color:#fff; }
+        .fcoin-display { position:fixed; top:24px; right:32px; font-size:1.2em; font-weight:700; color:#f1c40f; background:rgba(10,37,64,0.8); padding:8px 16px; border-radius:8px; z-index:20; display:none; }
+
+        .site-footer {
+            max-width:820px; margin:0 auto 40px; background:#1a1a1a; border-radius:16px;
+            padding:30px 20px; text-align:center; color:#ccc;
+        }
+        .site-footer a { color:#c9a96e; text-decoration:none; font-weight:600; cursor:pointer; }
+        .site-footer a:hover { text-decoration:underline; }
+
+        .grade-section { margin-bottom:24px; }
+        .grade-label { font-size:1.1em; font-weight:700; margin-bottom:8px; }
+        .badge { display:inline-block; padding:4px 12px; border-radius:12px; color:#fff; font-size:0.85em; margin-right:8px; }
+        .grade-a .badge { background:var(--grade-a); } .grade-b .badge { background:var(--grade-b); }
+        .grade-c .badge { background:var(--grade-c); } .grade-care .badge { background:var(--care); }
+        .gift-a .badge { background:var(--gift-a); } .gift-b .badge { background:var(--gift-b); } .gift-c .badge { background:var(--gift-c); }
+        .book-list { list-style:none; padding-left:16px; }
+        .book-item { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #f0f2f5; }
+        .book-name { flex:1; font-weight:500; }
+        .red-dot { width:10px; height:10px; background:#e74c3c; border-radius:50%; display:inline-block; margin-left:6px; animation:blink 1s infinite; }
+        @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+        .btn-detail { padding:7px 18px; border:1.5px solid var(--deep-blue); color:var(--deep-blue); border-radius:8px; background:transparent; cursor:pointer; font-size:0.85em; touch-action:manipulation; }
+        .btn-detail.waiting { border-color:var(--warning); color:var(--warning); }
+        .btn-detail.disabled { background:#e0e0e0; color:#999; border-color:#ccc; pointer-events:none; }
+
+        .table-wrap { overflow-x:auto; margin-top:16px; }
+        table { width:100%; border-collapse:collapse; font-size:0.9em; }
+        th,td { text-align:left; padding:11px 10px; border-bottom:1px solid #eee; }
+        th { background:#f8f9fb; font-weight:600; color:var(--deep-blue); }
+        .btn-sm { padding:5px 12px; font-size:0.82em; border-radius:6px; cursor:pointer; border:none; }
+        .btn-approve { background:#2d6a4f; color:#fff; }
+        .btn-reject { background:#c0392b; color:#fff; }
+        .btn-return { background:#e67e22; color:#fff; }
+
+        .btn-admin-outline { padding:8px 18px; background:transparent; border:1px solid #dce1e8; color:var(--text-secondary); border-radius:8px; cursor:pointer; font-size:0.9em; }
+        .btn-admin-outline:hover { background:rgba(10,37,64,0.05); border-color:var(--deep-blue); color:var(--deep-blue); }
+        .edit-book-btn { padding:5px 12px; border:1px solid #dce1e8; background:transparent; border-radius:6px; cursor:pointer; font-size:0.85em; color:var(--text-secondary); }
+        .edit-book-btn:hover { background:#f5f7fa; }
+        .btn-add-new { display:inline-block; padding:10px 20px; background:var(--deep-blue); color:#fff; border:none; border-radius:10px; font-weight:600; cursor:pointer; margin-bottom:20px; }
+        .btn-add-new:hover { background:#1e3a5f; }
+
+        #adminContentArea {
+            background: linear-gradient(180deg, #c9a96e 0%, #c9a96e 20%, #f4f6f9 20%, #f4f6f9 100%) !important;
+        }
+
+        .login-status-msg { text-align:center; padding:20px; color:#fff; font-size:1.1em; background:rgba(0,0,0,0.3); border-radius:8px; margin-bottom:20px; }
+
+        @media (max-width:600px) {
+            .content-container { margin:60px 8px 20px; padding:20px 14px; }
+            .brand-logo { top:14px; left:16px; font-size:1.4em; }
+            .fcoin-display { top:14px; right:16px; font-size:1em; }
+            .site-footer { margin:0 8px 20px; }
+        }
+        button, [data-action] { touch-action: manipulation; }
+    </style>
+</head>
+<body>
+<div class="brand-logo">LYINH</div>
+<div class="fcoin-display" id="fcoinDisplay">🪙 0</div>
+
+<div class="login-wrapper" id="loginWrapper">
+    <div class="login-card">
+        <h1 class="brand-title">Lyinh书城</h1>
+        <p class="brand-subtitle">书香满溢，智慧之约</p>
+        <div class="divider"><span>◆</span></div>
+        <form id="loginForm" autocomplete="off">
+            <div class="form-group"><label class="form-label">用户名</label><div class="input-container"><span class="input-icon">👤</span><input type="text" id="username" class="form-input" placeholder="请输入用户名" required></div></div>
+            <div class="form-group"><label class="form-label">密码</label><div class="input-container"><span class="input-icon">🔒</span><input type="password" id="password" class="form-input" placeholder="请输入密码" required></div></div>
+            <label class="remember-row"><input type="checkbox" id="rememberMe"> 记住登录（24小时）</label>
+            <div class="error-message" id="errorMessage"></div>
+            <div id="loginStatusMsg" class="login-status-msg" style="display:none;"></div>
+            <button type="button" class="btn-login" id="btnLogin">登 录</button>
+        </form>
+    </div>
+    <p class="footer-note">Lyinh书城 · 线下借书平台</p>
+</div>
+
+<div class="overlay" id="adminSuccessOverlay"><div class="overlay-card"><div style="font-size:3em;">✅</div><div style="font-size:1.5em; font-weight:700; color:var(--deep-blue);">登录成功</div><p id="adminSuccessMsg"></p><button class="btn-login mt-20" id="btnCloseAdminSuccess">进入管理后台</button></div></div>
+<div class="overlay" id="announcementOverlay"><div class="overlay-card"><div style="font-size:3em;">📢</div><div id="popupAnnouncementContent"></div><button class="btn-login mt-20" id="btnCloseAnnounce">我知道了</button></div></div>
+<div class="content-area" id="readerContentArea">
+    <div class="content-container" id="readerContentContainer"></div>
+    <div class="site-footer" id="siteFooter" style="display:none;">
+        <p style="margin-bottom:12px;">📖 Lyinh书城 · 线下借书平台</p>
+        <p><a id="btnAboutUs">关于我们</a></p>
+    </div>
+</div>
+<div class="content-area" id="adminContentArea"><div class="content-container" id="adminContentContainer"></div></div>
+<div class="overlay" id="generalOverlay"><div class="overlay-card" id="generalOverlayCard" style="text-align:left; max-width:500px;"></div></div>
+
+<script>
+(function() {
+    const SUPABASE_URL = 'https://fxopmluircvdusigbjmu.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_1c6r0mJ6JmJtroCkxdfzkA_RCaXWaY9';
+    let supabase, realtimeChannel, currentUser;
+    let booksData = [], reservationsData = [], announcementsData = {content:'lyinh书城手机/电脑端上线'};
+    let lastWaitActionTime = 0, lastFeedbackTime = 0;
+    let userFcoin = 0, readerTab = 'collection';
+    let pricingData = [];
+    let isSubmittingBorrow = false;
+    let currentGiftSeries = null;
+    let siteStatus = 'running';
+
+    function initSupabase() { if(typeof window.supabase==='undefined') return false; supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY); return true; }
+    async function sha256(msg) { const enc = new TextEncoder(); const hash = await crypto.subtle.digest('SHA-256', enc.encode(msg)); return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join(''); }
+
+    const loginWrapper = document.getElementById('loginWrapper');
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const rememberCheckbox = document.getElementById('rememberMe');
+    const errorMsgEl = document.getElementById('errorMessage');
+    const loginStatusMsg = document.getElementById('loginStatusMsg');
+    const adminSuccessOverlay = document.getElementById('adminSuccessOverlay');
+    const adminSuccessMsg = document.getElementById('adminSuccessMsg');
+    const btnCloseAdminSuccess = document.getElementById('btnCloseAdminSuccess');
+    const announceOverlay = document.getElementById('announcementOverlay');
+    const popupContent = document.getElementById('popupAnnouncementContent');
+    const btnCloseAnnounce = document.getElementById('btnCloseAnnounce');
+    const readerContentArea = document.getElementById('readerContentArea');
+    const readerContainer = document.getElementById('readerContentContainer');
+    const adminContentArea = document.getElementById('adminContentArea');
+    const adminContainer = document.getElementById('adminContentContainer');
+    const generalOverlay = document.getElementById('generalOverlay');
+    const generalCard = document.getElementById('generalOverlayCard');
+    const fcoinDisplay = document.getElementById('fcoinDisplay');
+    const siteFooter = document.getElementById('siteFooter');
+    const btnAboutUs = document.getElementById('btnAboutUs');
+
+    const SESSION_KEY = 'lyinh_session';
+    function saveSession(u,r,d) { localStorage.setItem(SESSION_KEY, JSON.stringify({username:u,role:r,displayName:d,ts:Date.now()})); }
+    function loadSession() { const raw = localStorage.getItem(SESSION_KEY); if(!raw) return null; const s = JSON.parse(raw); if(Date.now()-s.ts > 86400000) { localStorage.removeItem(SESSION_KEY); return null; } return s; }
+    function clearSession() { localStorage.removeItem(SESSION_KEY); }
+
+    async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
+    async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
+    async function loadAnnouncement() { const {data} = await supabase.from('announcements').select('content').eq('id',1).single(); if(data) announcementsData = data; }
+    async function loadPricing() { const { data } = await supabase.from('pricing').select('*'); if (data) pricingData = data; }
+    async function loadUserFcoin() { if(!currentUser) return; const {data} = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); if(data) userFcoin = data.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; }
+    async function loadSiteStatus() { const { data } = await supabase.from('site_status').select('status').single(); if (data) siteStatus = data.status; updateLoginUIByStatus(); }
+    async function refreshAllData() { await Promise.all([loadBooks(), loadReservations(), loadAnnouncement(), loadUserFcoin(), loadPricing(), loadSiteStatus()]); }
+
+    function updateLoginUIByStatus() {
+        const body = document.body;
+        loginStatusMsg.style.display = 'none';
+        switch(siteStatus) {
+            case 'running':
+                body.style.background = 'linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%)';
+                loginStatusMsg.innerHTML = ''; break;
+            case 'repair':
+                body.style.background = 'linear-gradient(180deg, #e67e22 0%, #e67e22 20%, #f4f6f9 20%, #f4f6f9 100%)';
+                loginStatusMsg.style.display = 'block'; loginStatusMsg.innerHTML = '⚠️ 正在维修中，请稍后再试……'; break;
+            case 'maintenance':
+                body.style.background = 'linear-gradient(180deg, #e67e22 0%, #e67e22 20%, #f4f6f9 20%, #f4f6f9 100%)';
+                loginStatusMsg.style.display = 'block'; loginStatusMsg.innerHTML = '🔧 正在例行维护中，请稍后再来'; break;
+            case 'closed':
+                body.style.background = 'linear-gradient(180deg, #c0392b 0%, #c0392b 20%, #f4f6f9 20%, #f4f6f9 100%)';
+                loginStatusMsg.style.display = 'block'; loginStatusMsg.innerHTML = '🚫 抱歉，该书城已经停服，给您带来不便。'; break;
+        }
+    }
+
+    function setupRealtime() {
+        if(!supabase) return;
+        if(realtimeChannel) supabase.removeChannel(realtimeChannel);
+        realtimeChannel = supabase.channel('lyinh-realtime')
+            .on('postgres_changes', {event:'*', schema:'public', table:'books'}, ()=>refreshAllData().then(updateUI))
+            .on('postgres_changes', {event:'*', schema:'public', table:'reservations'}, ()=>refreshAllData().then(updateUI))
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{ announcementsData.content = payload.new.content; updateAnnouncementUI(); })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'app_users', filter:`username=eq.${currentUser?.username}`}, payload=>{ userFcoin = payload.new.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; if(currentUser?.role==='reader' && readerTab==='gift' && readerContentArea.classList.contains('show')) renderGiftHome(); })
+            .on('postgres_changes', {event:'*', schema:'public', table:'pricing'}, () => { loadPricing(); })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'site_status'}, () => { loadSiteStatus(); })
+            .on('postgres_changes', {event:'INSERT', schema:'public', table:'messages'}, () => { updateMailDot(); })
+            .subscribe();
+    }
+
+    function updateAnnouncementUI() {
+        const c = announcementsData.content;
+        if(popupContent) popupContent.textContent = c;
+        const scrollEl = document.getElementById('readerScrollAnnouncement');
+        if(scrollEl) {
+            scrollEl.textContent = c;
+            startAnnounceScroll();
+        }
+    }
+
+    function startAnnounceScroll() {
+        const container = document.querySelector('.announcement-scroll');
+        const textEl = container?.querySelector('.scroll-text');
+        if (!container || !textEl) return;
+        if (textEl._scrollId) cancelAnimationFrame(textEl._scrollId);
+        const speed = 0.8;
+        let x = container.offsetWidth;
+        textEl.style.transform = `translateX(${x}px)`;
+        function step() {
+            x -= speed;
+            textEl.style.transform = `translateX(${x}px)`;
+            if (x <= -textEl.offsetWidth) x = container.offsetWidth;
+            textEl._scrollId = requestAnimationFrame(step);
+        }
+        textEl._scrollId = requestAnimationFrame(step);
+    }
+
+    async function updateMailDot() {
+        if (!currentUser || currentUser.role !== 'reader') return;
+        const { count } = await supabase.from('messages').select('*', { count: 'exact', head: true }).eq('recipient', currentUser.username).eq('read', false);
+        const dot = document.getElementById('mailDot');
+        if (dot) { if (count > 0) dot.classList.add('show'); else dot.classList.remove('show'); }
+    }
+
+    function updateUI() {
+        if(currentUser?.role === 'reader' && readerContentArea.classList.contains('show')) {
+            if(readerTab === 'collection') renderCollectionHome();
+            else if(readerTab === 'gift') {
+                if (currentGiftSeries && readerContainer.querySelector('#btnBackGift')) showGiftDetail(currentGiftSeries.seriesName, currentGiftSeries.grade, currentGiftSeries.cost);
+                else renderGiftHome();
+            }
+            else if(readerTab === 'mail') renderMailPage();
+            else if(readerTab === 'profile') renderProfilePage();
+            else if(readerTab === 'about') renderAboutPage();
+            siteFooter.style.display = (readerTab === 'about') ? 'none' : 'block';
+            updateMailDot();
+        }
+        if(currentUser?.role === 'admin' && adminContentArea.classList.contains('show')) renderAdminPanel();
+    }
+
+    function hideAll() { [adminSuccessOverlay, announceOverlay, readerContentArea, adminContentArea, generalOverlay].forEach(el=>el.classList.remove('show')); loginWrapper.style.opacity='1'; loginWrapper.style.pointerEvents='all'; fcoinDisplay.style.display = 'none'; }
+
+    function getBookById(id) { return booksData.find(b=>b.id==id); }
+    function getWaitingCount(bookId) { return reservationsData.filter(r=>r.book_id==bookId && r.status==='waiting').length; }
+    function getMyReservation(bookId) { if(!currentUser) return null; return reservationsData.find(r=>r.book_id==bookId && r.username===currentUser.username && r.status!=='cancelled'); }
+    function getMyNotifications() { if(!currentUser) return []; return reservationsData.filter(r=>r.username===currentUser.username && (r.status==='approved'||r.status==='rejected') && !r.read); }
+    function getPriceInfo(grade) {
+        const fiveDayItem = pricingData.find(p => p.grade === grade && p.type === '5天款');
+        const shortItem = pricingData.find(p => p.grade === grade && p.type === '1天/3天款');
+        const fiveDay = fiveDayItem ? (fiveDayItem.is_free ? '免费' : fiveDayItem.price) : null;
+        const short = shortItem ? (shortItem.is_free ? '免费' : shortItem.price) : null;
+        return { fiveDay: fiveDay || (grade==='A'?'4.9元/5天':grade==='B'?'2.9元/5天':grade==='C'?'1.9元/5天':grade==='care'?'2.5元/5天':'?'), short: short || (grade==='A'?'1元/1天':grade==='B'?'2元/3天':grade==='C'?'1元/3天':grade==='care'?'1.5元/3天':'?') };
+    }
+    function getGiftCost(grade) { if(grade==='gift-A') return 30; if(grade==='gift-B') return 50; if(grade==='gift-C') return 80; return Infinity; }
+    function getSeriesName(title) { return title.replace(/[0-9]+$/,'').trim(); }
+
+    function bindAction(selector, callback) { document.querySelectorAll(selector).forEach(el => { const handler = (e) => { e.preventDefault(); e.stopPropagation(); callback(e, el); }; el.removeEventListener('click', handler); el.removeEventListener('touchend', handler); el.addEventListener('click', handler); el.addEventListener('touchend', handler, { passive: false }); }); }
+
+    // ========== 登录处理 ==========
+    document.getElementById('btnLogin').addEventListener('click', async (e)=>{ e.preventDefault(); errorMsgEl.textContent = ''; const u = usernameInput.value.trim(), p = passwordInput.value.trim(); if(!u||!p) { errorMsgEl.textContent='请输入用户名和密码'; return; } if(!supabase && !initSupabase()) { errorMsgEl.textContent='初始化失败'; return; } const btn = document.getElementById('btnLogin'); btn.disabled = true; try { const hash = await sha256(p); const { data: users } = await supabase.from('app_users').select('*').eq('username', u).limit(1); if(!users?.length || users[0].password_hash !== hash) { errorMsgEl.textContent='用户名或密码错误'; btn.disabled = false; return; } const user = users[0]; if (user.role === 'reader' && siteStatus !== 'running') { loginStatusMsg.style.display = 'block'; btn.disabled = false; return; } handleLoginImmediate(user.username, user.role, user.display_name); } catch(err) { errorMsgEl.textContent='网络错误'; } finally { btn.disabled = false; } });
+
+    async function handleLoginImmediate(username, role, displayName) { currentUser = { username, role, displayName }; if(rememberCheckbox.checked) saveSession(username, role, displayName); setupRealtime(); loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none'; if(role === 'reader') { fcoinDisplay.style.display = 'block'; announceOverlay.classList.add('show'); popupContent.textContent = '加载中...'; btnCloseAnnounce.onclick = null; refreshAllData().then(() => { popupContent.textContent = announcementsData.content; btnCloseAnnounce.onclick = () => { announceOverlay.classList.remove('show'); readerContentArea.classList.add('show'); renderCollectionHome(); }; }); } else { adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`; btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); }; } }
+
+    function logout() { if(realtimeChannel) supabase.removeChannel(realtimeChannel); realtimeChannel = null; clearSession(); currentUser = null; booksData = []; reservationsData = []; hideAll(); fcoinDisplay.style.display = 'none'; }
+
+    // 页面加载时只初始化并检查状态，不再自动登录
+    window.addEventListener('load', async () => {
+        if(initSupabase()) {
+            await loadSiteStatus();
+        }
+    });
+
+    document.addEventListener('keydown', e => { if(e.key==='Escape') { if(generalOverlay.classList.contains('show')) generalOverlay.classList.remove('show'); else if(announceOverlay.classList.contains('show')) btnCloseAnnounce.click(); else if(adminSuccessOverlay.classList.contains('show')) btnCloseAdminSuccess.click(); } });
+
+    // ========== 读者界面渲染 ==========
+    function renderCollectionHome() {
+        const gradeOrder = ['A','B','C','care']; const gradeNames = {'A':'A级书目','B':'B级书目','C':'C级书目','care':'爱护书目'}; const gradeCSS = {'A':'grade-a','B':'grade-b','C':'grade-c','care':'grade-care'};
+        let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>📚 书馆藏品</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnNotifications">🔔 通知</button><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
+        <div class="tabs"><button class="tab-btn active" id="tabCollection">藏品</button><button class="tab-btn" id="tabGift">赠品</button></div>
+        <div class="announcement-scroll"><span class="scroll-text" id="readerScrollAnnouncement">${announcementsData.content}</span></div>`;
+        gradeOrder.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const sn = getSeriesName(b.title); if(!seriesMap.has(sn)) seriesMap.set(sn,[]); seriesMap.get(sn).push(b); }); html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; }); html += `</ul></div>`; });
+        readerContainer.innerHTML = html;
+        siteFooter.style.display = 'block';
+        document.getElementById('tabCollection').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
+        document.getElementById('tabGift').addEventListener('click', ()=>{ readerTab='gift'; renderGiftHome(); });
+        document.getElementById('btnSettings').addEventListener('click', e=>{ e.stopPropagation(); document.getElementById('settingsDropdown').classList.toggle('show'); });
+        document.addEventListener('click', ()=>document.getElementById('settingsDropdown')?.classList.remove('show'));
+        document.getElementById('btnNotifications').addEventListener('click', ()=>{ showNotifications(); });
+        document.getElementById('btnReaderLogout').addEventListener('click', logout);
+        document.getElementById('btnFeedback').addEventListener('click', showFeedbackForm);
+        document.getElementById('btnMail').addEventListener('click', ()=>{ readerTab='mail'; renderMailPage(); });
+        document.getElementById('btnProfile').addEventListener('click', ()=>{ readerTab='profile'; renderProfilePage(); });
+        bindAction('.btn-detail', (e, btn) => showSeriesDetail(btn.dataset.series, btn.dataset.grade));
+        btnAboutUs.onclick = () => { readerTab='about'; renderAboutPage(); };
+        updateMailDot();
+        startAnnounceScroll();
+    }
+
+    function renderGiftHome() {
+        currentGiftSeries = null;
+        const giftGrades = ['gift-A','gift-B','gift-C']; const giftNames = {'gift-A':'1级赠品','gift-B':'2级赠品','gift-C':'3级赠品'}; const giftCSS = {'gift-A':'gift-a','gift-B':'gift-b','gift-C':'gift-c'}; const costs = { 'gift-A':30, 'gift-B':50, 'gift-C':80 };
+        let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>🎁 赠品中心</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
+        <div class="tabs"><button class="tab-btn" id="tabCollection">藏品</button><button class="tab-btn active" id="tabGift">赠品</button></div>
+        <div style="background:#fef9e7;padding:12px;border-radius:8px;margin-bottom:16px;"><p>💰 我的F币：<strong id="giftFcoinDisplay">${userFcoin}</strong></p></div>`;
+        giftGrades.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const sn = getSeriesName(b.title); if(!seriesMap.has(sn)) seriesMap.set(sn,[]); seriesMap.get(sn).push(b); }); const canAfford = userFcoin >= costs[grade]; html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='gift-A'?'1':grade==='gift-B'?'2':'3'}级</span> ${giftNames[grade]} (需${costs[grade]}币)</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; const btnClass = canAfford ? 'btn-detail' : 'btn-detail disabled'; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="${btnClass}" data-series="${seriesName}" data-grade="${grade}" data-cost="${costs[grade]}">详情/兑换</button></li>`; }); html += `</ul></div>`; });
+        readerContainer.innerHTML = html;
+        siteFooter.style.display = 'block';
+        document.getElementById('giftFcoinDisplay').textContent = userFcoin;
+        document.getElementById('tabCollection').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
+        document.getElementById('tabGift').addEventListener('click', ()=>{ readerTab='gift'; renderGiftHome(); });
+        document.getElementById('btnSettings').addEventListener('click', e=>{ e.stopPropagation(); document.getElementById('settingsDropdown').classList.toggle('show'); });
+        document.addEventListener('click', ()=>document.getElementById('settingsDropdown')?.classList.remove('show'));
+        document.getElementById('btnReaderLogout').addEventListener('click', logout);
+        document.getElementById('btnFeedback').addEventListener('click', showFeedbackForm);
+        document.getElementById('btnMail').addEventListener('click', ()=>{ readerTab='mail'; renderMailPage(); });
+        document.getElementById('btnProfile').addEventListener('click', ()=>{ readerTab='profile'; renderProfilePage(); });
+        bindAction('.btn-detail:not(.disabled)', (e, btn) => showGiftDetail(btn.dataset.series, btn.dataset.grade, parseInt(btn.dataset.cost)));
+        btnAboutUs.onclick = () => { readerTab='about'; renderAboutPage(); };
+        updateMailDot();
+    }
+
+    function renderMailPage() { readerContainer.innerHTML = `<div class="content-header"><h2>📬 邮箱</h2><button class="btn-admin-outline" id="btnBackReader">← 返回</button></div><div id="mailList">加载中...</div>`; document.getElementById('btnBackReader').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); loadMails(); }
+    async function loadMails() { if(!currentUser) return; const {data} = await supabase.from('messages').select('*').eq('recipient', currentUser.username).order('created_at', {ascending: false}); let html = ''; if(data && data.length>0) { data.forEach(m => { html += `<div style="background:#f8f9fb;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid var(--deep-blue);"><p style="font-weight:600;">${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small></div>`; }); } else html = '<p>暂无邮件</p>'; document.getElementById('mailList').innerHTML = html; await supabase.from('messages').update({ read: true }).eq('recipient', currentUser.username).eq('read', false); updateMailDot(); }
+
+    function renderProfilePage() { readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>`; supabase.from('app_users').select('display_name').eq('username', currentUser.username).single().then(({data})=>{ const displayName = data?.display_name || currentUser.username; let html = `<div class="profile-info" style="background:#f9fafc;border-radius:12px;padding:20px;margin-bottom:24px;"><h3>${displayName}</h3><p>用户名：${currentUser.username}</p><p>F币余额：${userFcoin}</p></div>`; html += `<button class="btn-login" id="btnBorrowHistory">📖 借阅记录</button>`; html += `<div id="historyArea" class="mt-16"></div>`; readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>` + html; document.getElementById('btnBackProfile').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); document.getElementById('btnBorrowHistory').addEventListener('click', showBorrowHistory); }); }
+    async function showBorrowHistory() { const {data: history} = await supabase.from('reservations').select('*, books(title)').eq('username', currentUser.username).order('request_time', {ascending: false}); let html = '<h3>📖 借阅/候书记录</h3>'; if (history && history.length > 0) { html += '<div class="table-wrap"><table><tr><th>书名</th><th>类型</th><th>状态</th><th>时间</th></tr>'; history.forEach(r => { html += `<tr><td>${r.books?.title||'未知'}</td><td>${r.type==='borrow'?'借阅':(r.type==='wait'?'候书':'其他')}</td><td>${r.status}</td><td>${new Date(r.request_time).toLocaleString()}</td></tr>`; }); html += '</table></div>'; } else html += '<p>暂无记录</p>'; document.getElementById('historyArea').innerHTML = html; }
+    function showFeedbackForm() { const now = Date.now(); if(now - lastFeedbackTime < 3600000) { alert('请等待1小时后再反馈'); return; } const html = `<h3>提交反馈</h3><textarea id="feedbackContent" rows="4" class="form-input" style="width:100%;margin:12px 0;" placeholder="请输入您的反馈..."></textarea><button class="btn-login" id="btnSubmitFeedback">提交</button><button class="btn-admin-outline mt-12" id="btnCancelFeedback">取消</button>`; showGeneralModal(html); document.getElementById('btnCancelFeedback').addEventListener('click', ()=> hideOverlay(generalOverlay)); document.getElementById('btnSubmitFeedback').addEventListener('click', async ()=>{ const content = document.getElementById('feedbackContent').value.trim(); if(!content) return alert('内容不能为空'); await supabase.from('feedbacks').insert({ username: currentUser.username, content }); lastFeedbackTime = Date.now(); hideOverlay(generalOverlay); alert('反馈已提交'); }); }
+    function showGiftDetail(seriesName, grade, cost) { currentGiftSeries = { seriesName, grade, cost }; const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, btnHTML; if (bookState === 'sent') { statusText = '已送出'; btnHTML = `<button class="btn-detail disabled">已送出</button>`; } else if (bookState === 'unavailable') { statusText = '不可兑换'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else if (bookState === 'upcoming') { statusText = '即将上架'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else { const canExchange = book.status === 'free'; statusText = canExchange ? '可兑换' : '不可兑换'; btnHTML = canExchange ? `<button class="btn-detail" data-action="exchange" data-id="${book.id}" data-cost="${cost}">兑换</button>` : `<button class="btn-detail disabled">不可兑换</button>`; } tableRows += `<tr><td>${book.title}</td><td>${statusText}</td><td>${btnHTML}</td></tr>`; }); readerContainer.innerHTML = `<div class="content-header"><h2>🎁 ${seriesName}</h2><button class="btn-admin-outline" id="btnBackGift">← 返回</button></div>${author ? `<p>作者：${author}</p>`:''}${notes ? `<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>状态</th><th>兑换</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackGift').addEventListener('click', ()=>{ currentGiftSeries = null; renderGiftHome(); }); bindAction('[data-action="exchange"]', async (e,btn)=>{ const bookId = btn.dataset.id; const requiredCost = parseInt(btn.dataset.cost); if(userFcoin < requiredCost) return alert('F币不足'); if(!confirm(`确定消耗 ${requiredCost} F币兑换此书吗？`)) return; const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); const newCoin = (user.fcoin||0) - requiredCost; if(newCoin < 0) return alert('F币不足'); const { error: fcoinError } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', currentUser.username); if(fcoinError) { alert('扣除F币失败'); return; } const book = getBookById(bookId); await supabase.from('messages').insert({ recipient: 'admin', sender: currentUser?.displayName||currentUser.username||'读者', content: `📦 兑换申请：用户 ${currentUser.username} 兑换了《${book?.title||'未知'}》（赠品等级 ${book?.grade||'未知'}），已扣除 ${requiredCost} F币。请前往管理端手动调整书籍状态。` }); await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'exchange', status: 'pending_admin', request_time: new Date().toISOString(), read: false }); await refreshAllData(); alert('兑换成功！已扣除F币，请等待管理员确认。'); renderGiftHome(); }); }
+    function renderAboutPage() { readerContainer.innerHTML = `<div class="content-header"><h2>📖 关于我们</h2><button class="btn-admin-outline" id="btnBackAbout">← 返回</button></div><div style="line-height:1.8;"><p><strong>制作：</strong>星耀铁</p><p><strong>总监：</strong>梦语</p><p><strong>合作方：</strong>梦语、乐音恒</p><p><strong>合作工作室：</strong>梦语工作室、Lyinh工作室、米斯工作室</p><p><strong>感谢支持：</strong>周贤宇、梦语、Lyinh</p><hr><p><strong>注：</strong><br>星耀铁：米斯工作室<br>梦语：梦语工作室<br>乐音恒：乐音工作室</p><p><strong>星耀铁+梦语+乐音恒联合为：Lyinh工作室</strong></p><p><strong>Lyinh：</strong>乐游网（乐）、校园网（星）、棋艺网（梦）、仿易游戏（星）Lyinh书城（乐、星、梦）</p></div>`; siteFooter.style.display = 'none'; document.getElementById('btnBackAbout').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); }
+
+    // ========== 读者端核心借阅逻辑 ==========
+    function showSeriesDetail(seriesName, grade) { const seriesBooks = booksData.filter(b => getSeriesName(b.title) === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, statusColor, btnHTML; if (bookState !== 'normal') { const stateMap = { 'unavailable':'不可借阅', 'upcoming':'即将上架', 'external':'外借' }; statusText = stateMap[bookState]||bookState; statusColor = bookState==='upcoming'?'color:#2980b9;':'color:#c0392b;'; if (bookState === 'external') { btnHTML = `<button class="btn-detail waiting" data-action="wait" data-id="${book.id}">候书</button>`; } else { btnHTML = `<button class="btn-detail disabled">不可借阅</button>`; } } else { const statusMap = { 'free':'空闲', 'borrowed':'已借出', 'pending_review':'审理中' }; statusText = statusMap[book.status]||book.status; const waitingCount = getWaitingCount(book.id); if (book.status==='free') statusColor = 'color:#27ae60; font-weight:bold;'; else if (book.status==='borrowed') statusColor = 'color:#c0392b;'; else if (book.status==='pending_review') statusColor = 'color:#e67e22;'; if (book.status==='borrowed' && waitingCount>0) statusText += ` (${waitingCount}人候)`; const myRes = getMyReservation(book.id); if (book.status==='free') btnHTML = `<button class="btn-detail" data-action="borrow" data-id="${book.id}">借阅</button>`; else if (book.status==='pending_review') btnHTML = myRes && myRes.status==='pending_review' ? '<span style="color:#e67e22;">正在审理中</span>' : `<button class="btn-detail" data-action="detail" data-id="${book.id}">详情/借阅</button>`; else if (book.status==='borrowed') { if (myRes && myRes.status==='waiting') btnHTML = `<button class="btn-detail waiting" data-action="cancelWait" data-id="${book.id}">已候</button>`; else if (canWait(book.id)) btnHTML = `<button class="btn-detail" data-action="wait" data-id="${book.id}">候书</button>`; else if (book.current_borrower===currentUser.username) btnHTML = '<span style="color:#888;">您正在借阅此书</span>'; else btnHTML = '<span style="color:#888;">不可候书</span>'; } } const myRes = getMyReservation(book.id); const notifDot = (myRes && (myRes.status==='approved'||myRes.status==='rejected') && !myRes.read) ? '<span class="red-dot"></span>' : ''; tableRows += `<tr><td>${book.title}${notifDot}</td><td><span style="${statusColor}">${statusText}</span></td><td>${btnHTML}</td></tr>`; }); const gradeNames = {'A':'A级','B':'B级','C':'C级','care':'爱护'}; readerContainer.innerHTML = `<div class="content-header"><h2>📖 ${seriesName} <small>${gradeNames[grade]}书目</small></h2><button class="btn-admin-outline" id="btnBackToList">← 返回</button></div>${author?`<p>作者：${author}</p>`:''}${notes?`<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>情况</th><th>借阅</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackToList').addEventListener('click', ()=>{ if(readerTab==='gift') renderGiftHome(); else renderCollectionHome(); }); bindAction('[data-action="borrow"]', (e,btn)=> borrowBook(btn.dataset.id)); bindAction('[data-action="wait"]', (e,btn)=> handleWaitBook(btn.dataset.id)); bindAction('[data-action="cancelWait"]', (e,btn)=> handleCancelWait(btn.dataset.id)); bindAction('.red-dot', ()=> showNotifications()); }
+    function borrowBook(bookId) { if (isSubmittingBorrow) { alert('请求正在处理中，请勿重复点击'); return; } const book = getBookById(bookId); if (!book || !canBorrow(bookId)) { alert('您已提交过借阅申请，或您正在借阅此书'); return; } const price = getPriceInfo(book.grade); const displayFiveDay = price.fiveDay==='免费'?'免费':price.fiveDay; const displayShort = price.short==='免费'?'免费':price.short; readerContainer.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:3em;">💳</div><h3>请用微信搜索：yyh20130917</h3><p>添加后备注来意并支付相关金额</p><div style="display:flex;gap:12px;justify-content:center;"><button class="btn-login" id="btnPlan5">5天款 (${displayFiveDay})</button><button class="btn-login" id="btnPlanShort">1天/3天款 (${displayShort})</button></div><button class="btn-admin-outline mt-12" id="btnCancelBorrow">取消</button></div>`; document.getElementById('btnCancelBorrow').addEventListener('click', ()=> { isSubmittingBorrow = false; showSeriesDetail(book.title.replace(/[0-9]+$/,'').trim(), book.grade); }); document.getElementById('btnPlan5').addEventListener('click', () => submitBorrowRequest(book, '5days')); document.getElementById('btnPlanShort').addEventListener('click', () => submitBorrowRequest(book, 'short')); }
+    async function submitBorrowRequest(book, borrowType) { if (isSubmittingBorrow) return; isSubmittingBorrow = true; if (!canBorrow(book.id)) { alert('您已提交过借阅申请'); isSubmittingBorrow = false; return; } const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'borrow', status: 'pending_review', request_time: new Date().toISOString(), borrow_type: borrowType, read: false }); if (!error) { await supabase.from('books').update({ status: 'pending_review' }).eq('id', book.id); await refreshAllData(); renderCollectionHome(); } else alert('提交失败'); isSubmittingBorrow = false; }
+    function canBorrow(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state && book.state !== 'normal') return false; if (book.status === 'free') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); }
+    function canWait(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state === 'external') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); if (book.status !== 'borrowed') return false; if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); }
+    async function handleWaitBook(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; if (!canWait(bookId)) { const book = getBookById(bookId); if (book && book.state === 'external' && reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting')) { alert('您已候过此书'); } else { alert('无法候书'); } return; } const book = getBookById(bookId); const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'wait', status: 'waiting', request_time: new Date().toISOString(), read: false }); if (!error) { await refreshAllData(); showSeriesDetail(book.title.replace(/[0-9]+$/,'').trim(), book.grade); } else alert('操作失败'); }
+    async function handleCancelWait(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; const myRes = getMyReservation(bookId); if (myRes && myRes.status === 'waiting') { await supabase.from('reservations').update({ status: 'cancelled' }).eq('id', myRes.id); await refreshAllData(); const book = getBookById(bookId); showSeriesDetail(book.title.replace(/[0-9]+$/,'').trim(), book.grade); } }
+    function showNotifications() { const notifs = getMyNotifications(); if (!notifs.length) { alert('暂无新通知'); return; } let html = '<h3 style="color:var(--deep-blue);">📬 通知</h3>'; notifs.forEach(n => { const book = getBookById(n.book_id); const title = book ? book.title : '未知'; if (n.status === 'approved') html += `<div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>✅ ${title}</strong><br>已通过审理<br>${n.return_time ? '应归还时间：'+new Date(n.return_time).toLocaleDateString() : ''}</div>`; else if (n.status === 'rejected') html += `<div style="background:#fdecea;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>❌ ${title}</strong><br>已被拒绝<br>原因：${n.reject_reason||'未说明'}</div>`; }); html += `<button class="btn-login mt-12" id="btnMarkAllRead">全部标为已读</button>`; showGeneralModal(html); document.getElementById('btnMarkAllRead').addEventListener('click', async ()=>{ for (const n of notifs) await supabase.from('reservations').update({ read: true }).eq('id', n.id); await refreshAllData(); hideOverlay(generalOverlay); renderCollectionHome(); }); }
+    function showGeneralModal(innerHTML, maxWidth = '500px') { generalCard.innerHTML = innerHTML + `<div style="text-align:center;margin-top:16px;"><button class="btn-admin-outline" id="btnCloseGeneral">关闭</button></div>`; generalCard.style.maxWidth = maxWidth; generalOverlay.classList.add('show'); document.getElementById('btnCloseGeneral').addEventListener('click', () => { generalOverlay.classList.remove('show'); generalCard.style.maxWidth = '500px'; }); }
+    function hideOverlay(el) { el.classList.remove('show'); }
 
     // ========== 管理端面板 ==========
     function renderAdminPanel() {
@@ -114,7 +505,7 @@
         bindAction('.del-history-btn', async (e, btn) => { if(confirm('删除此审理记录？')) { await supabase.from('reservations').delete().eq('id', btn.dataset.id); renderReviewHistory(); } });
     }
 
-    // ===================== 书籍管理（修复一键换书） =====================
+    // ===================== 书籍管理 =====================
     function renderManageBooks() {
         let html = '<h3>📚 所有书籍（不含赠品）</h3><div class="table-wrap"><table><tr><th>书名</th><th>状态</th><th>借阅人</th><th>候书</th><th>操作</th></tr>';
         const statusMap = { 'free': '空闲', 'borrowed': '已借出', 'pending_review': '审理中' };
@@ -140,7 +531,7 @@
         document.getElementById('adminSubContent').innerHTML = html;
         bindAction('.btn-return', async (e,btn)=>{
             const bookId = btn.dataset.id;
-            await refreshAllData(); // 先刷新数据
+            await refreshAllData();
             const book = getBookById(bookId);
             if (!book) return alert('未找到书籍信息');
             if (book.state === 'normal' && book.status === 'free') { alert('此书已空闲'); return; }
