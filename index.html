@@ -43,8 +43,12 @@
 
         .overlay { position:fixed; inset:0; z-index:100; background:rgba(10,37,64,0.9); display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.5s; }
         .overlay.show { opacity:1; pointer-events:all; }
-        .overlay-card { background:#fff; border-radius:16px; padding:36px; text-align:center; box-shadow:0 24px 64px rgba(0,0,0,0.2); max-width:440px; width:90%; animation:popIn 0.5s ease; }
+        .overlay-card { background:#fff; border-radius:16px; padding:36px; text-align:center; box-shadow:0 24px 64px rgba(0,0,0,0.2); max-width:440px; width:90%; animation:popIn 0.5s ease; position:relative; }
         @keyframes popIn { 0%{transform:scale(0.8);opacity:0;} 100%{transform:scale(1);opacity:1;} }
+
+        .announce-popup { position:relative; }
+        .announce-close-btn { position:absolute; top:12px; right:16px; background:none; border:none; font-size:1.5em; cursor:pointer; color:#888; line-height:1; padding:0 4px; }
+        .announce-content { white-space:pre-wrap; text-align:left; margin-top:24px; font-size:1em; color:var(--text-primary); line-height:1.6; }
 
         .content-area { position:fixed; top:0; left:0; width:100%; height:100%; z-index:50; background:linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%); overflow-y:auto; display:none; padding:20px; }
         .content-area.show { display:block; }
@@ -144,7 +148,14 @@
 </div>
 
 <div class="overlay" id="adminSuccessOverlay"><div class="overlay-card"><div style="font-size:3em;">✅</div><div style="font-size:1.5em; font-weight:700; color:var(--deep-blue);">登录成功</div><p id="adminSuccessMsg"></p><button class="btn-login mt-20" id="btnCloseAdminSuccess">进入管理后台</button></div></div>
-<div class="overlay" id="announcementOverlay"><div class="overlay-card"><div style="font-size:3em;">📢</div><div id="popupAnnouncementContent"></div><button class="btn-login mt-20" id="btnCloseAnnounce">我知道了</button></div></div>
+
+<div class="overlay" id="announcementOverlay">
+    <div class="overlay-card announce-popup">
+        <button class="announce-close-btn" id="btnCloseAnnounce">❌</button>
+        <div class="announce-content" id="popupAnnouncementContent"></div>
+    </div>
+</div>
+
 <div class="content-area" id="readerContentArea">
     <div class="content-container" id="readerContentContainer"></div>
     <div class="site-footer" id="siteFooter" style="display:none;">
@@ -160,7 +171,9 @@
     const SUPABASE_URL = 'https://fxopmluircvdusigbjmu.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_1c6r0mJ6JmJtroCkxdfzkA_RCaXWaY9';
     let supabase, realtimeChannel, currentUser;
-    let booksData = [], reservationsData = [], announcementsData = {content:'lyinh书城手机/电脑端上线'};
+    let booksData = [], reservationsData = [];
+    let popupAnnouncementContent = 'lyinh书城手机/电脑端上线';   // 弹窗公告
+    let scrollAnnouncementContent = '欢迎光临 Lyinh 书城';      // 滚动公告
     let lastWaitActionTime = 0, lastFeedbackTime = 0;
     let userFcoin = 0, readerTab = 'collection';
     let pricingData = [];
@@ -200,11 +213,19 @@
 
     async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
     async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
-    async function loadAnnouncement() { const {data} = await supabase.from('announcements').select('content').eq('id',1).single(); if(data) announcementsData = data; }
+    
+    // 分别加载两个公告
+    async function loadAnnouncements() {
+        const { data: d1 } = await supabase.from('announcements').select('content').eq('id',1).single();
+        if(d1) popupAnnouncementContent = d1.content;
+        const { data: d2 } = await supabase.from('announcements').select('content').eq('id',2).single();
+        if(d2) scrollAnnouncementContent = d2.content;
+    }
+
     async function loadPricing() { const { data } = await supabase.from('pricing').select('*'); if (data) pricingData = data; }
     async function loadUserFcoin() { if(!currentUser) return; const {data} = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); if(data) userFcoin = data.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; }
     async function loadSiteStatus() { const { data } = await supabase.from('site_status').select('status').single(); if (data) siteStatus = data.status; updateLoginUIByStatus(); }
-    async function refreshAllData() { await Promise.all([loadBooks(), loadReservations(), loadAnnouncement(), loadUserFcoin(), loadPricing(), loadSiteStatus()]); }
+    async function refreshAllData() { await Promise.all([loadBooks(), loadReservations(), loadAnnouncements(), loadUserFcoin(), loadPricing(), loadSiteStatus()]); }
 
     function updateLoginUIByStatus() {
         const body = document.body;
@@ -231,7 +252,15 @@
         realtimeChannel = supabase.channel('lyinh-realtime')
             .on('postgres_changes', {event:'*', schema:'public', table:'books'}, ()=>refreshAllData().then(updateUI))
             .on('postgres_changes', {event:'*', schema:'public', table:'reservations'}, ()=>refreshAllData().then(updateUI))
-            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{ announcementsData.content = payload.new.content; updateAnnouncementUI(); })
+            // 监听公告表变化，分别处理
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{
+                popupAnnouncementContent = payload.new.content;
+                updatePopupAnnouncementUI();
+            })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.2'}, payload=>{
+                scrollAnnouncementContent = payload.new.content;
+                updateScrollAnnouncementUI();
+            })
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'app_users', filter:`username=eq.${currentUser?.username}`}, payload=>{ userFcoin = payload.new.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; if(currentUser?.role==='reader' && readerTab==='gift' && readerContentArea.classList.contains('show')) renderGiftHome(); })
             .on('postgres_changes', {event:'*', schema:'public', table:'pricing'}, () => { loadPricing(); })
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'site_status'}, () => { loadSiteStatus(); })
@@ -239,12 +268,13 @@
             .subscribe();
     }
 
-    function updateAnnouncementUI() {
-        const c = announcementsData.content;
-        if(popupContent) popupContent.textContent = c;
+    function updatePopupAnnouncementUI() {
+        if(popupContent) popupContent.textContent = popupAnnouncementContent;
+    }
+    function updateScrollAnnouncementUI() {
         const scrollEl = document.getElementById('readerScrollAnnouncement');
         if(scrollEl) {
-            scrollEl.textContent = c;
+            scrollEl.textContent = scrollAnnouncementContent;
             startAnnounceScroll();
         }
     }
@@ -310,14 +340,22 @@
     // ========== 登录处理 ==========
     document.getElementById('btnLogin').addEventListener('click', async (e)=>{ e.preventDefault(); errorMsgEl.textContent = ''; const u = usernameInput.value.trim(), p = passwordInput.value.trim(); if(!u||!p) { errorMsgEl.textContent='请输入用户名和密码'; return; } if(!supabase && !initSupabase()) { errorMsgEl.textContent='初始化失败'; return; } const btn = document.getElementById('btnLogin'); btn.disabled = true; try { const hash = await sha256(p); const { data: users } = await supabase.from('app_users').select('*').eq('username', u).limit(1); if(!users?.length || users[0].password_hash !== hash) { errorMsgEl.textContent='用户名或密码错误'; btn.disabled = false; return; } const user = users[0]; if (user.role === 'reader' && siteStatus !== 'running') { loginStatusMsg.style.display = 'block'; btn.disabled = false; return; } handleLoginImmediate(user.username, user.role, user.display_name); } catch(err) { errorMsgEl.textContent='网络错误'; } finally { btn.disabled = false; } });
 
-    async function handleLoginImmediate(username, role, displayName) { currentUser = { username, role, displayName }; if(rememberCheckbox.checked) saveSession(username, role, displayName); setupRealtime(); loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none'; if(role === 'reader') { fcoinDisplay.style.display = 'block'; announceOverlay.classList.add('show'); popupContent.textContent = '加载中...'; btnCloseAnnounce.onclick = null; refreshAllData().then(() => { popupContent.textContent = announcementsData.content; btnCloseAnnounce.onclick = () => { announceOverlay.classList.remove('show'); readerContentArea.classList.add('show'); renderCollectionHome(); }; }); } else { adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`; btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); }; } }
+    async function handleLoginImmediate(username, role, displayName) { currentUser = { username, role, displayName }; if(rememberCheckbox.checked) saveSession(username, role, displayName); setupRealtime(); loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none'; if(role === 'reader') { fcoinDisplay.style.display = 'block'; announceOverlay.classList.add('show'); popupContent.textContent = '加载中...'; refreshAllData().then(() => { popupContent.textContent = popupAnnouncementContent; }); } else { adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`; btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); }; } }
+
+    // 关闭公告弹窗事件绑定（只绑定一次）
+    btnCloseAnnounce.addEventListener('click', () => {
+        announceOverlay.classList.remove('show');
+        readerContentArea.classList.add('show');
+        renderCollectionHome();
+    });
 
     function logout() { if(realtimeChannel) supabase.removeChannel(realtimeChannel); realtimeChannel = null; clearSession(); currentUser = null; booksData = []; reservationsData = []; hideAll(); fcoinDisplay.style.display = 'none'; }
 
-    // 页面加载时只初始化并检查状态，不再自动登录
+    // 页面加载：初始化Supabase，加载状态和公告，但不自动登录
     window.addEventListener('load', async () => {
         if(initSupabase()) {
             await loadSiteStatus();
+            await loadAnnouncements();
         }
     });
 
@@ -328,7 +366,7 @@
         const gradeOrder = ['A','B','C','care']; const gradeNames = {'A':'A级书目','B':'B级书目','C':'C级书目','care':'爱护书目'}; const gradeCSS = {'A':'grade-a','B':'grade-b','C':'grade-c','care':'grade-care'};
         let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>📚 书馆藏品</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnNotifications">🔔 通知</button><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
         <div class="tabs"><button class="tab-btn active" id="tabCollection">藏品</button><button class="tab-btn" id="tabGift">赠品</button></div>
-        <div class="announcement-scroll"><span class="scroll-text" id="readerScrollAnnouncement">${announcementsData.content}</span></div>`;
+        <div class="announcement-scroll"><span class="scroll-text" id="readerScrollAnnouncement">${scrollAnnouncementContent}</span></div>`;
         gradeOrder.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const sn = getSeriesName(b.title); if(!seriesMap.has(sn)) seriesMap.set(sn,[]); seriesMap.get(sn).push(b); }); html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; }); html += `</ul></div>`; });
         readerContainer.innerHTML = html;
         siteFooter.style.display = 'block';
@@ -347,6 +385,9 @@
         startAnnounceScroll();
     }
 
+// ========== 第二部分，紧接第一部分拼接点 ==========
+
+    // ========== 读者界面渲染（续） ==========
     function renderGiftHome() {
         currentGiftSeries = null;
         const giftGrades = ['gift-A','gift-B','gift-C']; const giftNames = {'gift-A':'1级赠品','gift-B':'2级赠品','gift-C':'3级赠品'}; const giftCSS = {'gift-A':'gift-a','gift-B':'gift-b','gift-C':'gift-c'}; const costs = { 'gift-A':30, 'gift-B':50, 'gift-C':80 };
@@ -408,8 +449,13 @@
                 <button class="btn-login admin-tab-btn" style="width:auto;" data-page="status">🚦 书城状态</button>
             </div>
             <div id="editPanel" style="display:block; margin-top:16px;">
-                <h3>修改公告</h3><textarea id="adminAnnouncementInput" rows="3" style="width:100%; padding:14px;">${announcementsData.content}</textarea>
-                <button class="btn-login mt-12" id="btnSaveAnnouncement">保存</button>
+                <h3>📢 弹窗公告（登录后弹出）</h3>
+                <textarea id="adminPopupAnnouncementInput" rows="3" style="width:100%; padding:14px;">${popupAnnouncementContent}</textarea>
+                <button class="btn-login mt-12" id="btnSavePopupAnnouncement">保存弹窗公告</button>
+                <div style="margin:24px 0; border-top:2px dashed #dce1e8;"></div>
+                <h3>📜 滚动公告（读者主页顶部）</h3>
+                <textarea id="adminScrollAnnouncementInput" rows="3" style="width:100%; padding:14px;">${scrollAnnouncementContent}</textarea>
+                <button class="btn-login mt-12" id="btnSaveScrollAnnouncement">保存滚动公告</button>
                 <button class="btn-admin-outline mt-12" id="btnAnnounceHistory">📜 公告历史</button>
                 <div id="announceHistoryArea" class="mt-16"></div>
             </div>
@@ -420,7 +466,26 @@
 
         // 编辑公告
         document.querySelector('.admin-tab-btn[data-page="edit"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'block'; document.getElementById('adminSubContent').innerHTML = ''; document.getElementById('announceHistoryArea').innerHTML = ''; });
-        document.getElementById('btnSaveAnnouncement').addEventListener('click', async ()=>{ const content = document.getElementById('adminAnnouncementInput').value.trim(); if(!content) return alert('公告不能为空'); await supabase.from('announcement_history').insert({ content }); await supabase.from('announcements').update({ content }).eq('id', 1); announcementsData.content = content; updateAnnouncementUI(); alert('公告已更新'); });
+        // 保存弹窗公告
+        document.getElementById('btnSavePopupAnnouncement').addEventListener('click', async ()=>{
+            const content = document.getElementById('adminPopupAnnouncementInput').value;
+            if(!content.trim()) return alert('弹窗公告不能为空');
+            await supabase.from('announcement_history').insert({ content, type: 'popup' });
+            await supabase.from('announcements').upsert({ id:1, content });
+            popupAnnouncementContent = content;
+            updatePopupAnnouncementUI();
+            alert('弹窗公告已更新');
+        });
+        // 保存滚动公告
+        document.getElementById('btnSaveScrollAnnouncement').addEventListener('click', async ()=>{
+            const content = document.getElementById('adminScrollAnnouncementInput').value;
+            if(!content.trim()) return alert('滚动公告不能为空');
+            await supabase.from('announcement_history').insert({ content, type: 'scroll' });
+            await supabase.from('announcements').upsert({ id:2, content });
+            scrollAnnouncementContent = content;
+            updateScrollAnnouncementUI();
+            alert('滚动公告已更新');
+        });
         document.getElementById('btnAnnounceHistory').addEventListener('click', renderAnnouncementHistory);
 
         // 借阅审理
@@ -450,7 +515,7 @@
         const { data } = await supabase.from('announcement_history').select('*').order('changed_at', { ascending: false });
         let html = '<h4>📜 公告修改记录</h4>';
         if (!data || data.length === 0) html += '<p>暂无记录</p>';
-        else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`); html += '</table></div>'; }
+        else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => { html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.type==='popup'?'弹窗':'滚动'}</td><td style="white-space:pre-wrap;">${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`; }); html += '</table></div>'; }
         document.getElementById('announceHistoryArea').innerHTML = html;
         bindAction('.del-announce-btn', async (e, btn) => { if(confirm('删除此条记录？')) { await supabase.from('announcement_history').delete().eq('id', btn.dataset.id); renderAnnouncementHistory(); } });
     }
