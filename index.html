@@ -41,6 +41,10 @@
         .error-message { text-align:center; color:var(--error); font-size:0.85em; min-height:22px; }
         .footer-note { text-align:center; margin-top:24px; font-size:0.8em; color:#8f9bb3; }
 
+        /* 登录页滚动公告 */
+        .login-scroll-wrap { margin:16px 0 8px; background:#f0f4ff; border-left:4px solid var(--deep-blue); border-radius:8px; overflow:hidden; height:36px; display:flex; align-items:center; position:relative; }
+        .login-scroll-text { position:absolute; white-space:nowrap; will-change:transform; font-size:0.9em; color:var(--deep-blue); }
+
         .overlay { position:fixed; inset:0; z-index:100; background:rgba(10,37,64,0.9); display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.5s; }
         .overlay.show { opacity:1; pointer-events:all; }
         .overlay-card { background:#fff; border-radius:16px; padding:36px; text-align:center; box-shadow:0 24px 64px rgba(0,0,0,0.2); max-width:440px; width:90%; animation:popIn 0.5s ease; position:relative; }
@@ -48,7 +52,8 @@
 
         .announce-popup { position:relative; }
         .announce-close-btn { position:absolute; top:12px; right:16px; background:none; border:none; font-size:1.5em; cursor:pointer; color:#888; line-height:1; padding:0 4px; }
-        .announce-content { white-space:pre-wrap; text-align:left; margin-top:24px; font-size:1em; color:var(--text-primary); line-height:1.6; }
+        .announce-title { position:absolute; top:18px; left:50%; transform:translateX(-50%); font-weight:700; color:var(--deep-blue); font-size:1.1em; }
+        .announce-content { white-space:pre-wrap; text-align:left; margin-top:48px; font-size:1em; color:var(--text-primary); line-height:1.6; }
 
         .content-area { position:fixed; top:0; left:0; width:100%; height:100%; z-index:50; background:linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%); overflow-y:auto; display:none; padding:20px; }
         .content-area.show { display:block; }
@@ -134,6 +139,9 @@
     <div class="login-card">
         <h1 class="brand-title">Lyinh书城</h1>
         <p class="brand-subtitle">书香满溢，智慧之约</p>
+        <div class="login-scroll-wrap" id="loginScrollWrap">
+            <span class="login-scroll-text" id="loginScrollText">欢迎访问 Lyinh 书城，请登录。</span>
+        </div>
         <div class="divider"><span>◆</span></div>
         <form id="loginForm" autocomplete="off">
             <div class="form-group"><label class="form-label">用户名</label><div class="input-container"><span class="input-icon">👤</span><input type="text" id="username" class="form-input" placeholder="请输入用户名" required></div></div>
@@ -151,6 +159,7 @@
 
 <div class="overlay" id="announcementOverlay">
     <div class="overlay-card announce-popup">
+        <span class="announce-title">公告</span>
         <button class="announce-close-btn" id="btnCloseAnnounce">❌</button>
         <div class="announce-content" id="popupAnnouncementContent"></div>
     </div>
@@ -173,7 +182,8 @@
     let supabase, realtimeChannel, currentUser;
     let booksData = [], reservationsData = [];
     let popupAnnouncementContent = 'lyinh书城手机/电脑端上线';   // 弹窗公告
-    let scrollAnnouncementContent = '欢迎光临 Lyinh 书城';      // 滚动公告
+    let scrollAnnouncementContent = '欢迎光临 Lyinh 书城';      // 读者主页滚动公告
+    let loginAnnouncementContent = '欢迎访问 Lyinh 书城，请登录。'; // 登录页滚动公告
     let lastWaitActionTime = 0, lastFeedbackTime = 0;
     let userFcoin = 0, readerTab = 'collection';
     let pricingData = [];
@@ -205,6 +215,8 @@
     const fcoinDisplay = document.getElementById('fcoinDisplay');
     const siteFooter = document.getElementById('siteFooter');
     const btnAboutUs = document.getElementById('btnAboutUs');
+    const loginScrollWrap = document.getElementById('loginScrollWrap');
+    const loginScrollText = document.getElementById('loginScrollText');
 
     const SESSION_KEY = 'lyinh_session';
     function saveSession(u,r,d) { localStorage.setItem(SESSION_KEY, JSON.stringify({username:u,role:r,displayName:d,ts:Date.now()})); }
@@ -214,12 +226,15 @@
     async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
     async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
     
-    // 分别加载两个公告
+    // 加载三条公告
     async function loadAnnouncements() {
         const { data: d1 } = await supabase.from('announcements').select('content').eq('id',1).single();
         if(d1) popupAnnouncementContent = d1.content;
         const { data: d2 } = await supabase.from('announcements').select('content').eq('id',2).single();
         if(d2) scrollAnnouncementContent = d2.content;
+        const { data: d3 } = await supabase.from('announcements').select('content').eq('id',3).single();
+        if(d3) loginAnnouncementContent = d3.content;
+        updateLoginScroll();
     }
 
     async function loadPricing() { const { data } = await supabase.from('pricing').select('*'); if (data) pricingData = data; }
@@ -252,7 +267,6 @@
         realtimeChannel = supabase.channel('lyinh-realtime')
             .on('postgres_changes', {event:'*', schema:'public', table:'books'}, ()=>refreshAllData().then(updateUI))
             .on('postgres_changes', {event:'*', schema:'public', table:'reservations'}, ()=>refreshAllData().then(updateUI))
-            // 监听公告表变化，分别处理
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{
                 popupAnnouncementContent = payload.new.content;
                 updatePopupAnnouncementUI();
@@ -260,6 +274,10 @@
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.2'}, payload=>{
                 scrollAnnouncementContent = payload.new.content;
                 updateScrollAnnouncementUI();
+            })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.3'}, payload=>{
+                loginAnnouncementContent = payload.new.content;
+                updateLoginScroll();
             })
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'app_users', filter:`username=eq.${currentUser?.username}`}, payload=>{ userFcoin = payload.new.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; if(currentUser?.role==='reader' && readerTab==='gift' && readerContentArea.classList.contains('show')) renderGiftHome(); })
             .on('postgres_changes', {event:'*', schema:'public', table:'pricing'}, () => { loadPricing(); })
@@ -275,13 +293,35 @@
         const scrollEl = document.getElementById('readerScrollAnnouncement');
         if(scrollEl) {
             scrollEl.textContent = scrollAnnouncementContent;
-            startAnnounceScroll();
+            startAnnounceScroll(scrollEl);
+        }
+    }
+    function updateLoginScroll() {
+        if(loginScrollText) {
+            loginScrollText.textContent = loginAnnouncementContent;
+            startLoginScroll();
         }
     }
 
-    function startAnnounceScroll() {
-        const container = document.querySelector('.announcement-scroll');
-        const textEl = container?.querySelector('.scroll-text');
+    function startLoginScroll() {
+        const container = loginScrollWrap;
+        const textEl = loginScrollText;
+        if (!container || !textEl) return;
+        if (textEl._scrollId) cancelAnimationFrame(textEl._scrollId);
+        const speed = 0.8;
+        let x = container.offsetWidth;
+        textEl.style.transform = `translateX(${x}px)`;
+        function step() {
+            x -= speed;
+            textEl.style.transform = `translateX(${x}px)`;
+            if (x <= -textEl.offsetWidth) x = container.offsetWidth;
+            textEl._scrollId = requestAnimationFrame(step);
+        }
+        textEl._scrollId = requestAnimationFrame(step);
+    }
+
+    function startAnnounceScroll(textEl) {
+        const container = textEl?.parentElement;
         if (!container || !textEl) return;
         if (textEl._scrollId) cancelAnimationFrame(textEl._scrollId);
         const speed = 0.8;
@@ -342,7 +382,6 @@
 
     async function handleLoginImmediate(username, role, displayName) { currentUser = { username, role, displayName }; if(rememberCheckbox.checked) saveSession(username, role, displayName); setupRealtime(); loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none'; if(role === 'reader') { fcoinDisplay.style.display = 'block'; announceOverlay.classList.add('show'); popupContent.textContent = '加载中...'; refreshAllData().then(() => { popupContent.textContent = popupAnnouncementContent; }); } else { adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`; btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); }; } }
 
-    // 关闭公告弹窗事件绑定（只绑定一次）
     btnCloseAnnounce.addEventListener('click', () => {
         announceOverlay.classList.remove('show');
         readerContentArea.classList.add('show');
@@ -351,11 +390,10 @@
 
     function logout() { if(realtimeChannel) supabase.removeChannel(realtimeChannel); realtimeChannel = null; clearSession(); currentUser = null; booksData = []; reservationsData = []; hideAll(); fcoinDisplay.style.display = 'none'; }
 
-    // 页面加载：初始化Supabase，加载状态和公告，但不自动登录
     window.addEventListener('load', async () => {
         if(initSupabase()) {
             await loadSiteStatus();
-            await loadAnnouncements();
+            await loadAnnouncements(); // 加载所有公告，包括登录公告
         }
     });
 
@@ -382,10 +420,10 @@
         bindAction('.btn-detail', (e, btn) => showSeriesDetail(btn.dataset.series, btn.dataset.grade));
         btnAboutUs.onclick = () => { readerTab='about'; renderAboutPage(); };
         updateMailDot();
-        startAnnounceScroll();
+        startAnnounceScroll(document.getElementById('readerScrollAnnouncement'));
     }
 
-// ========== 第二部分，紧接第一部分拼接点 ==========
+// ========== 第二部分 紧接上一部分末尾 ==========
 
     // ========== 读者界面渲染（续） ==========
     function renderGiftHome() {
@@ -456,6 +494,10 @@
                 <h3>📜 滚动公告（读者主页顶部）</h3>
                 <textarea id="adminScrollAnnouncementInput" rows="3" style="width:100%; padding:14px;">${scrollAnnouncementContent}</textarea>
                 <button class="btn-login mt-12" id="btnSaveScrollAnnouncement">保存滚动公告</button>
+                <div style="margin:24px 0; border-top:2px dashed #dce1e8;"></div>
+                <h3>🔐 登录公告（登录页面滚动）</h3>
+                <textarea id="adminLoginAnnouncementInput" rows="3" style="width:100%; padding:14px;">${loginAnnouncementContent}</textarea>
+                <button class="btn-login mt-12" id="btnSaveLoginAnnouncement">保存登录公告</button>
                 <button class="btn-admin-outline mt-12" id="btnAnnounceHistory">📜 公告历史</button>
                 <div id="announceHistoryArea" class="mt-16"></div>
             </div>
@@ -466,7 +508,6 @@
 
         // 编辑公告
         document.querySelector('.admin-tab-btn[data-page="edit"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'block'; document.getElementById('adminSubContent').innerHTML = ''; document.getElementById('announceHistoryArea').innerHTML = ''; });
-        // 保存弹窗公告
         document.getElementById('btnSavePopupAnnouncement').addEventListener('click', async ()=>{
             const content = document.getElementById('adminPopupAnnouncementInput').value;
             if(!content.trim()) return alert('弹窗公告不能为空');
@@ -476,7 +517,6 @@
             updatePopupAnnouncementUI();
             alert('弹窗公告已更新');
         });
-        // 保存滚动公告
         document.getElementById('btnSaveScrollAnnouncement').addEventListener('click', async ()=>{
             const content = document.getElementById('adminScrollAnnouncementInput').value;
             if(!content.trim()) return alert('滚动公告不能为空');
@@ -485,6 +525,15 @@
             scrollAnnouncementContent = content;
             updateScrollAnnouncementUI();
             alert('滚动公告已更新');
+        });
+        document.getElementById('btnSaveLoginAnnouncement').addEventListener('click', async ()=>{
+            const content = document.getElementById('adminLoginAnnouncementInput').value;
+            if(!content.trim()) return alert('登录公告不能为空');
+            await supabase.from('announcement_history').insert({ content, type: 'login' });
+            await supabase.from('announcements').upsert({ id:3, content });
+            loginAnnouncementContent = content;
+            updateLoginScroll();
+            alert('登录公告已更新');
         });
         document.getElementById('btnAnnounceHistory').addEventListener('click', renderAnnouncementHistory);
 
@@ -515,7 +564,7 @@
         const { data } = await supabase.from('announcement_history').select('*').order('changed_at', { ascending: false });
         let html = '<h4>📜 公告修改记录</h4>';
         if (!data || data.length === 0) html += '<p>暂无记录</p>';
-        else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => { html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.type==='popup'?'弹窗':'滚动'}</td><td style="white-space:pre-wrap;">${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`; }); html += '</table></div>'; }
+        else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => { html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.type==='popup'?'弹窗':h.type==='scroll'?'滚动':'登录'}</td><td style="white-space:pre-wrap;">${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`; }); html += '</table></div>'; }
         document.getElementById('announceHistoryArea').innerHTML = html;
         bindAction('.del-announce-btn', async (e, btn) => { if(confirm('删除此条记录？')) { await supabase.from('announcement_history').delete().eq('id', btn.dataset.id); renderAnnouncementHistory(); } });
     }
@@ -540,7 +589,8 @@
         if(!returnDate) return;
         const dateObj = new Date(returnDate + 'T23:59:59');
         if(isNaN(dateObj.getTime())) { alert('日期格式无效'); return; }
-        await supabase.from('reservations').update({ status:'approved', return_time: dateObj.toISOString(), read:false }).eq('id', resId);
+        const { error } = await supabase.from('reservations').update({ status:'approved', return_time: dateObj.toISOString(), read:false }).eq('id', resId);
+        if(error) { alert('操作失败：'+error.message); return; }
         await supabase.from('books').update({ status:'borrowed', current_borrower: app.username }).eq('id', app.book_id);
         await supabase.from('reservations').update({ status:'cancelled' }).eq('book_id', app.book_id).eq('username', app.username).eq('status','waiting');
         const book = getBookById(app.book_id);
@@ -552,7 +602,8 @@
         const reason = prompt('请输入拒绝原因：');
         if(!reason) return;
         const app = reservationsData.find(r => r.id == resId);
-        await supabase.from('reservations').update({ status:'rejected', reject_reason:reason, read:false }).eq('id', resId);
+        const { error } = await supabase.from('reservations').update({ status:'rejected', reject_reason:reason, read:false }).eq('id', resId);
+        if(error) { alert('操作失败：'+error.message); return; }
         if(app) { const other = reservationsData.filter(r => r.book_id==app.book_id && r.status==='pending_review' && r.id!=resId); if(!other.length) await supabase.from('books').update({ status:'free', current_borrower:null }).eq('id', app.book_id); }
         const book = getBookById(app.book_id);
         await supabase.from('messages').insert({ recipient: app.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的借阅申请《${book?.title||'未知'}》已被拒绝，原因：${reason}` });
@@ -567,7 +618,7 @@
         html += '</table><button class="btn-admin-outline mt-12" id="btnBackReview">← 返回待审理</button>';
         document.getElementById('adminSubContent').innerHTML = html;
         document.getElementById('btnBackReview').addEventListener('click', renderReviewApps);
-        bindAction('.del-history-btn', async (e, btn) => { if(confirm('删除此审理记录？')) { await supabase.from('reservations').delete().eq('id', btn.dataset.id); renderReviewHistory(); } });
+        bindAction('.del-history-btn', async (e, btn) => { if(confirm('删除此审理记录？')) { await supabase.from('reservations').delete().eq('id', btn.dataset.id); await refreshAllData(); renderReviewHistory(); } });
     }
 
     // ===================== 书籍管理 =====================
@@ -772,7 +823,8 @@
         if (!amount || amount <= 0) return;
         const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', username).single();
         const newCoin = (user.fcoin || 0) + amount;
-        await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', username);
+        const { error } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', username);
+        if(error) { alert('添加失败：'+error.message); return; }
         await sendFcoinNotification(username, amount, 'add', newCoin);
         await refreshAllData();
         alert(`已为 ${username} 添加 ${amount} F币，当前余额 ${newCoin}`);
@@ -784,7 +836,8 @@
         if (!amount || amount <= 0) return;
         const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', username).single();
         const newCoin = Math.max(0, (user.fcoin || 0) - amount);
-        await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', username);
+        const { error } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', username);
+        if(error) { alert('扣除失败：'+error.message); return; }
         await sendFcoinNotification(username, amount, 'sub', newCoin);
         await refreshAllData();
         alert(`已为 ${username} 扣除 ${amount} F币，当前余额 ${newCoin}`);
@@ -812,11 +865,12 @@
     async function renderFeedbackHistory() {
         const { data: feedbacks } = await supabase.from('feedbacks').select('*').not('reply', 'is', null).order('replied_at', { ascending: false });
         let html = '<h3>📜 已回复反馈</h3>';
-        if (feedbacks && feedbacks.length > 0) { html += '<div class="table-wrap"><table><tr><th>用户</th><th>时间</th><th>操作</th></tr>'; feedbacks.forEach(f => { html += `<tr><td>${f.username}</td><td>${new Date(f.created_at).toLocaleString()}</td><td><button class="btn-sm btn-approve history-detail-btn" data-id="${f.id}">详情</button></td></tr>`; }); html += '</table></div>'; } else html += '<p>暂无历史记录</p>';
+        if (feedbacks && feedbacks.length > 0) { html += '<div class="table-wrap"><table><tr><th>用户</th><th>时间</th><th>操作</th></tr>'; feedbacks.forEach(f => { html += `<tr><td>${f.username}</td><td>${new Date(f.created_at).toLocaleString()}</td><td><button class="btn-sm btn-approve history-detail-btn" data-id="${f.id}">详情</button><button class="btn-sm btn-reject del-feedback-btn" data-id="${f.id}" style="margin-left:4px;">删除</button></td></tr>`; }); html += '</table></div>'; } else html += '<p>暂无历史记录</p>';
         html += `<button class="btn-admin-outline mt-12" id="btnBackFeedback">← 返回</button>`;
         document.getElementById('adminSubContent').innerHTML = html;
         document.getElementById('btnBackFeedback').addEventListener('click', renderFeedbackManage);
         bindAction('.history-detail-btn', (e, btn) => showFeedbackDetail(btn.dataset.id));
+        bindAction('.del-feedback-btn', async (e, btn) => { if(confirm('确定删除此反馈记录？')) { await supabase.from('feedbacks').delete().eq('id', btn.dataset.id); renderFeedbackHistory(); } });
     }
 
     async function showFeedbackDetail(feedbackId) {
@@ -830,7 +884,7 @@
         const html = `<h3>回复反馈</h3><textarea id="replyContent" rows="4" class="form-input" style="width:100%;margin:12px 0;"></textarea><button class="btn-login" id="btnSubmitReply">提交</button><button class="btn-admin-outline mt-12" id="btnCancelReply">取消</button>`;
         showGeneralModal(html);
         document.getElementById('btnCancelReply').addEventListener('click', () => hideOverlay(generalOverlay));
-        document.getElementById('btnSubmitReply').addEventListener('click', async () => { const content = document.getElementById('replyContent').value.trim(); if (!content) return; await supabase.from('feedbacks').update({ reply: content, replied_at: new Date().toISOString() }).eq('id', feedbackId); const { data: fb } = await supabase.from('feedbacks').select('username').eq('id', feedbackId).single(); if (fb) await supabase.from('messages').insert({ recipient: fb.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的反馈已回复：${content}` }); hideOverlay(generalOverlay); refreshAllData(); renderFeedbackManage(); });
+        document.getElementById('btnSubmitReply').addEventListener('click', async () => { const content = document.getElementById('replyContent').value.trim(); if (!content) return; const { error } = await supabase.from('feedbacks').update({ reply: content, replied_at: new Date().toISOString() }).eq('id', feedbackId); if(error) { alert('回复失败：'+error.message); return; } const { data: fb } = await supabase.from('feedbacks').select('username').eq('id', feedbackId).single(); if (fb) await supabase.from('messages').insert({ recipient: fb.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的反馈已回复：${content}` }); hideOverlay(generalOverlay); refreshAllData(); renderFeedbackManage(); });
     }
 
     // ===================== 送信 =====================
