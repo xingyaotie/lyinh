@@ -53,7 +53,7 @@
         .announce-popup { position:relative; }
         .announce-close-btn { position:absolute; top:12px; right:16px; background:none; border:none; font-size:1.5em; cursor:pointer; color:#888; line-height:1; padding:0 4px; }
         .announce-title { position:absolute; top:18px; left:50%; transform:translateX(-50%); font-weight:700; color:var(--deep-blue); font-size:1.1em; }
-        .announce-content { white-space:pre-wrap; text-align:left; margin-top:48px; font-size:1em; color:var(--text-primary); line-height:1.6; }
+        .announce-content { white-space:pre-wrap; text-align:left; margin-top:48px; font-size:1em; color:var(--text-primary); line-height:1.6; max-height:60vh; overflow-y:auto; }
 
         .content-area { position:fixed; top:0; left:0; width:100%; height:100%; z-index:50; background:linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%); overflow-y:auto; display:none; padding:20px; }
         .content-area.show { display:block; }
@@ -181,9 +181,9 @@
     const SUPABASE_ANON_KEY = 'sb_publishable_1c6r0mJ6JmJtroCkxdfzkA_RCaXWaY9';
     let supabase, realtimeChannel, currentUser;
     let booksData = [], reservationsData = [];
-    let popupAnnouncementContent = 'lyinh书城手机/电脑端上线';   // 弹窗公告
-    let scrollAnnouncementContent = '欢迎光临 Lyinh 书城';      // 读者主页滚动公告
-    let loginAnnouncementContent = '欢迎访问 Lyinh 书城，请登录。'; // 登录页滚动公告
+    let popupAnnouncementContent = 'lyinh书城手机/电脑端上线';
+    let scrollAnnouncementContent = '欢迎光临 Lyinh 书城';
+    let loginAnnouncementContent = '欢迎访问 Lyinh 书城，请登录。';
     let lastWaitActionTime = 0, lastFeedbackTime = 0;
     let userFcoin = 0, readerTab = 'collection';
     let pricingData = [];
@@ -225,8 +225,6 @@
 
     async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
     async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
-    
-    // 加载三条公告
     async function loadAnnouncements() {
         const { data: d1 } = await supabase.from('announcements').select('content').eq('id',1).single();
         if(d1) popupAnnouncementContent = d1.content;
@@ -236,7 +234,6 @@
         if(d3) loginAnnouncementContent = d3.content;
         updateLoginScroll();
     }
-
     async function loadPricing() { const { data } = await supabase.from('pricing').select('*'); if (data) pricingData = data; }
     async function loadUserFcoin() { if(!currentUser) return; const {data} = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); if(data) userFcoin = data.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; }
     async function loadSiteStatus() { const { data } = await supabase.from('site_status').select('status').single(); if (data) siteStatus = data.status; updateLoginUIByStatus(); }
@@ -286,37 +283,22 @@
             .subscribe();
     }
 
-    function updatePopupAnnouncementUI() {
-        if(popupContent) popupContent.textContent = popupAnnouncementContent;
-    }
+    function updatePopupAnnouncementUI() { if(popupContent) popupContent.textContent = popupAnnouncementContent; }
     function updateScrollAnnouncementUI() {
         const scrollEl = document.getElementById('readerScrollAnnouncement');
-        if(scrollEl) {
-            scrollEl.textContent = scrollAnnouncementContent;
-            startAnnounceScroll(scrollEl);
-        }
+        if(scrollEl) { scrollEl.textContent = scrollAnnouncementContent; startAnnounceScroll(scrollEl); }
     }
     function updateLoginScroll() {
-        if(loginScrollText) {
-            loginScrollText.textContent = loginAnnouncementContent;
-            startLoginScroll();
-        }
+        if(loginScrollText) { loginScrollText.textContent = loginAnnouncementContent; startLoginScroll(); }
     }
 
     function startLoginScroll() {
-        const container = loginScrollWrap;
-        const textEl = loginScrollText;
+        const container = loginScrollWrap, textEl = loginScrollText;
         if (!container || !textEl) return;
         if (textEl._scrollId) cancelAnimationFrame(textEl._scrollId);
-        const speed = 0.8;
-        let x = container.offsetWidth;
+        const speed = 0.8; let x = container.offsetWidth;
         textEl.style.transform = `translateX(${x}px)`;
-        function step() {
-            x -= speed;
-            textEl.style.transform = `translateX(${x}px)`;
-            if (x <= -textEl.offsetWidth) x = container.offsetWidth;
-            textEl._scrollId = requestAnimationFrame(step);
-        }
+        function step() { x -= speed; textEl.style.transform = `translateX(${x}px)`; if (x <= -textEl.offsetWidth) x = container.offsetWidth; textEl._scrollId = requestAnimationFrame(step); }
         textEl._scrollId = requestAnimationFrame(step);
     }
 
@@ -324,15 +306,9 @@
         const container = textEl?.parentElement;
         if (!container || !textEl) return;
         if (textEl._scrollId) cancelAnimationFrame(textEl._scrollId);
-        const speed = 0.8;
-        let x = container.offsetWidth;
+        const speed = 0.8; let x = container.offsetWidth;
         textEl.style.transform = `translateX(${x}px)`;
-        function step() {
-            x -= speed;
-            textEl.style.transform = `translateX(${x}px)`;
-            if (x <= -textEl.offsetWidth) x = container.offsetWidth;
-            textEl._scrollId = requestAnimationFrame(step);
-        }
+        function step() { x -= speed; textEl.style.transform = `translateX(${x}px)`; if (x <= -textEl.offsetWidth) x = container.offsetWidth; textEl._scrollId = requestAnimationFrame(step); }
         textEl._scrollId = requestAnimationFrame(step);
     }
 
@@ -393,7 +369,7 @@
     window.addEventListener('load', async () => {
         if(initSupabase()) {
             await loadSiteStatus();
-            await loadAnnouncements(); // 加载所有公告，包括登录公告
+            await loadAnnouncements();
         }
     });
 
@@ -423,7 +399,7 @@
         startAnnounceScroll(document.getElementById('readerScrollAnnouncement'));
     }
 
-// ========== 第二部分 紧接上一部分末尾 ==========
+// ========== 第二部分 紧接第一部分末尾 ==========
 
     // ========== 读者界面渲染（续） ==========
     function renderGiftHome() {
@@ -739,7 +715,11 @@
         const isGift = grade.startsWith('gift-');
         const gradeNames = { 'A': 'A级', 'B': 'B级', 'C': 'C级', 'care': '爱护', 'gift-A': '1级赠品', 'gift-B': '2级赠品', 'gift-C': '3级赠品' };
         let volumesHtml = '';
-        seriesBooks.forEach(book => { const stateText = book.state === 'normal' ? '正常' : (book.state === 'unavailable' ? '不可借阅' : (book.state === 'upcoming' ? '即将上架' : (book.state === 'external' ? '外借' : (book.state === 'sent' ? '已送出' : book.state)))); volumesHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;"><span>${book.title} <small style="color:#888;">[${stateText}]</small></span><button class="btn-sm edit-book-btn" data-id="${book.id}">编辑</button></div>`; });
+        seriesBooks.forEach(book => {
+            const stateText = book.state === 'normal' ? '正常' : (book.state === 'unavailable' ? '不可借阅' : (book.state === 'upcoming' ? '即将上架' : (book.state === 'external' ? '外借' : (book.state === 'sent' ? '已送出' : book.state))));
+            // 添加 data-series 和 data-grade 属性，用于编辑后保持系列信息
+            volumesHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid #eee;"><span>${book.title} <small style="color:#888;">[${stateText}]</small></span><button class="btn-sm edit-book-btn" data-id="${book.id}" data-series="${seriesName}" data-grade="${grade}">编辑</button></div>`;
+        });
         const html = `<div class="content-header"><h2>✏️ 编辑：${seriesName} ${seriesBooks.length > 1 ? `(共${seriesBooks.length}册)` : ''}</h2><button class="btn-admin-outline" id="btnBackEditList">← 返回</button></div>
             <div style="background:#f9fafc;border-radius:12px;padding:20px;margin-bottom:16px;"><p><strong>书籍名称：</strong>${seriesName}</p><p><strong>当前等级：</strong>${gradeNames[grade] || grade}</p><p><strong>作者：</strong>${author || '未填写'}</p><p><strong>注意事项：</strong>${notes || '无'}</p><div style="display:flex;gap:12px;margin-top:12px;"><button class="btn-sm btn-approve" id="btnEditSeriesMeta">修改信息</button><button class="btn-sm btn-approve" id="btnChangeGrade">修改等级</button></div></div>
             <div style="border-top:2px dashed #dce1e8;margin:20px 0;"></div><h3>分册列表</h3>${volumesHtml}<button class="btn-login mt-16" id="btnAddVolume">+ 添加分册</button>`;
@@ -748,7 +728,7 @@
         document.getElementById('btnEditSeriesMeta').addEventListener('click', () => editSeriesMeta(seriesName, grade, author, notes));
         document.getElementById('btnChangeGrade').addEventListener('click', () => changeSeriesGrade(seriesName, grade));
         document.getElementById('btnAddVolume').addEventListener('click', () => addVolume(seriesName, grade));
-        bindAction('.edit-book-btn', (e, btn) => editVolume(btn.dataset.id));
+        bindAction('.edit-book-btn', (e, btn) => editVolume(btn.dataset.id, btn.dataset.series, btn.dataset.grade));
     }
 
     function changeSeriesGrade(seriesName, currentGrade) {
@@ -773,7 +753,7 @@
         document.getElementById('btnConfirmAddVolume').addEventListener('click', async () => { const newTitle = currentCount > 0 ? `${seriesName}${volumeNum}` : seriesName; const firstBook = booksData.find(b => getSeriesName(b.title) === seriesName && b.grade === grade); const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; const { error } = await supabase.from('books').insert({ title: newTitle, grade, status: 'free', state: 'normal', author, notes }); if (error) alert('添加失败'); else { await refreshAllData(); hideOverlay(generalOverlay); showSeriesEdit(seriesName, grade); } });
     }
 
-    function editVolume(bookId) {
+    function editVolume(bookId, seriesName, grade) {
         const book = getBookById(bookId);
         if (!book) return;
         const currentState = book.state || 'normal';
@@ -786,8 +766,24 @@
         }
         const html = `<h3>编辑分册</h3><label>书名：<input id="editVolumeTitle" class="form-input" value="${book.title}"></label><label style="margin-top:12px;">状态：<select id="editVolumeState" class="form-input">${stateOptions}</select></label><div style="margin-top:16px;display:flex;gap:12px;"><button class="btn-login" id="btnSaveVolume">保存</button><button class="btn-sm btn-reject" id="btnDeleteVolume">删除此分册</button></div>`;
         showGeneralModal(html);
-        document.getElementById('btnSaveVolume').addEventListener('click', async () => { const newTitle = document.getElementById('editVolumeTitle').value.trim(); const newState = document.getElementById('editVolumeState').value; if (!newTitle) return alert('书名不能为空'); await supabase.from('books').update({ title: newTitle, state: newState }).eq('id', book.id); await refreshAllData(); hideOverlay(generalOverlay); showSeriesEdit(getSeriesName(newTitle), book.grade); });
-        document.getElementById('btnDeleteVolume').addEventListener('click', async () => { if (!confirm('确定删除此分册？')) return; await supabase.from('books').delete().eq('id', book.id); await refreshAllData(); hideOverlay(generalOverlay); if (book.grade.startsWith('gift-')) renderEditGifts(); else renderEditBooks(); });
+        document.getElementById('btnSaveVolume').addEventListener('click', async () => {
+            const newTitle = document.getElementById('editVolumeTitle').value.trim();
+            const newState = document.getElementById('editVolumeState').value;
+            if (!newTitle) return alert('书名不能为空');
+            await supabase.from('books').update({ title: newTitle, state: newState }).eq('id', bookId);
+            await refreshAllData();
+            hideOverlay(generalOverlay);
+            // 关键修复：使用传入的 seriesName 和 grade 返回编辑界面，而不是根据新书名重新计算
+            showSeriesEdit(seriesName, grade);
+        });
+        document.getElementById('btnDeleteVolume').addEventListener('click', async () => {
+            if (!confirm('确定删除此分册？')) return;
+            await supabase.from('books').delete().eq('id', bookId);
+            await refreshAllData();
+            hideOverlay(generalOverlay);
+            if (book.grade.startsWith('gift-')) renderEditGifts();
+            else renderEditBooks();
+        });
     }
 
     // ===================== 用户管理 =====================
@@ -953,4 +949,4 @@
 })();
 </script>
 </body>
-</html>
+</html>  
