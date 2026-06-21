@@ -216,7 +216,14 @@
     function loadSession() { const raw = localStorage.getItem(SESSION_KEY); if(!raw) return null; const s = JSON.parse(raw); if(Date.now()-s.ts > 86400000) { localStorage.removeItem(SESSION_KEY); return null; } return s; }
     function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
-    async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
+    async function loadBooks() {
+        const {data} = await supabase.from('books').select('*').order('title');
+        if(data) {
+            // 自动修复：若系列字段为空，则根据书名填入
+            data.forEach(b => { if(!b.series) b.series = getSeriesName(b.title); });
+            booksData = data;
+        }
+    }
     async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
     async function loadAnnouncements() {
         const { data: d1 } = await supabase.from('announcements').select('content').eq('id',1).single();
@@ -231,6 +238,9 @@
     async function loadUserFcoin() { if(!currentUser) return; const {data} = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); if(data) userFcoin = data.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; }
     async function loadSiteStatus() { const { data } = await supabase.from('site_status').select('status').single(); if (data) siteStatus = data.status; updateLoginUIByStatus(); }
     async function refreshAllData() { await Promise.all([loadBooks(), loadReservations(), loadAnnouncements(), loadUserFcoin(), loadPricing(), loadSiteStatus()]); }
+
+    // 辅助函数：从书名计算系列名（仅用于老数据修复，后续不再用于分组）
+    function getSeriesName(title) { return title.replace(/[0-9]+$/,'').trim(); }
 
     function updateLoginUIByStatus() {
         const body = document.body;
@@ -342,7 +352,6 @@
         return { fiveDay: fiveDay || (grade==='A'?'4.9元/5天':grade==='B'?'2.9元/5天':grade==='C'?'1.9元/5天':grade==='care'?'2.5元/5天':'?'), short: short || (grade==='A'?'1元/1天':grade==='B'?'2元/3天':grade==='C'?'1元/3天':grade==='care'?'1.5元/3天':'?') };
     }
     function getGiftCost(grade) { if(grade==='gift-A') return 30; if(grade==='gift-B') return 50; if(grade==='gift-C') return 80; return Infinity; }
-    function getSeriesName(title) { return title.replace(/[0-9]+$/,'').trim(); }
 
     function bindAction(selector, callback) { document.querySelectorAll(selector).forEach(el => { const handler = (e) => { e.preventDefault(); e.stopPropagation(); callback(e, el); }; el.removeEventListener('click', handler); el.removeEventListener('touchend', handler); el.addEventListener('click', handler); el.addEventListener('touchend', handler, { passive: false }); }); }
 
@@ -365,7 +374,16 @@
         let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>📚 书馆藏品</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnNotifications">🔔 通知</button><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
         <div class="tabs"><button class="tab-btn active" id="tabCollection">藏品</button><button class="tab-btn" id="tabGift">赠品</button></div>
         <div class="announcement-scroll"><span class="scroll-text" id="readerScrollAnnouncement">${scrollAnnouncementContent}</span></div>`;
-        gradeOrder.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const sn = getSeriesName(b.title); if(!seriesMap.has(sn)) seriesMap.set(sn,[]); seriesMap.get(sn).push(b); }); html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; }); html += `</ul></div>`; });
+        gradeOrder.forEach(grade=>{
+            const gradeBooks = booksData.filter(b=>b.grade===grade);
+            if(!gradeBooks.length) return;
+            const seriesMap = new Map();
+            // 核心：使用 book.series 进行分组
+            gradeBooks.forEach(b=>{ const s = b.series || '未分类'; if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); });
+            html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`;
+            seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; });
+            html += `</ul></div>`;
+        });
         readerContainer.innerHTML = html;
         siteFooter.style.display = 'block';
         document.getElementById('tabCollection').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
@@ -392,7 +410,7 @@
         let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>🎁 赠品中心</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
         <div class="tabs"><button class="tab-btn" id="tabCollection">藏品</button><button class="tab-btn active" id="tabGift">赠品</button></div>
         <div style="background:#fef9e7;padding:12px;border-radius:8px;margin-bottom:16px;"><p>💰 我的F币：<strong id="giftFcoinDisplay">${userFcoin}</strong></p></div>`;
-        giftGrades.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const sn = b.series || getSeriesName(b.title); if(!seriesMap.has(sn)) seriesMap.set(sn,[]); seriesMap.get(sn).push(b); }); const canAfford = userFcoin >= costs[grade]; html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='gift-A'?'1':grade==='gift-B'?'2':'3'}级</span> ${giftNames[grade]} (需${costs[grade]}币)</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; const btnClass = canAfford ? 'btn-detail' : 'btn-detail disabled'; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="${btnClass}" data-series="${seriesName}" data-grade="${grade}" data-cost="${costs[grade]}">详情/兑换</button></li>`; }); html += `</ul></div>`; });
+        giftGrades.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const s = b.series || '未分类'; if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); }); const canAfford = userFcoin >= costs[grade]; html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='gift-A'?'1':grade==='gift-B'?'2':'3'}级</span> ${giftNames[grade]} (需${costs[grade]}币)</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; const btnClass = canAfford ? 'btn-detail' : 'btn-detail disabled'; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="${btnClass}" data-series="${seriesName}" data-grade="${grade}" data-cost="${costs[grade]}">详情/兑换</button></li>`; }); html += `</ul></div>`; });
         readerContainer.innerHTML = html;
         siteFooter.style.display = 'block';
         document.getElementById('giftFcoinDisplay').textContent = userFcoin;
@@ -415,17 +433,58 @@
     function renderProfilePage() { readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>`; supabase.from('app_users').select('display_name').eq('username', currentUser.username).single().then(({data})=>{ const displayName = data?.display_name || currentUser.username; let html = `<div class="profile-info" style="background:#f9fafc;border-radius:12px;padding:20px;margin-bottom:24px;"><h3>${displayName}</h3><p>用户名：${currentUser.username}</p><p>F币余额：${userFcoin}</p></div>`; html += `<button class="btn-login" id="btnBorrowHistory">📖 借阅记录</button>`; html += `<div id="historyArea" class="mt-16"></div>`; readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>` + html; document.getElementById('btnBackProfile').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); document.getElementById('btnBorrowHistory').addEventListener('click', showBorrowHistory); }); }
     async function showBorrowHistory() { const {data: history} = await supabase.from('reservations').select('*, books(title)').eq('username', currentUser.username).order('request_time', {ascending: false}); let html = '<h3>📖 借阅/候书记录</h3>'; if (history && history.length > 0) { html += '<div class="table-wrap"><table><tr><th>书名</th><th>类型</th><th>状态</th><th>时间</th></tr>'; history.forEach(r => { html += `<tr><td>${r.books?.title||'未知'}</td><td>${r.type==='borrow'?'借阅':(r.type==='wait'?'候书':'其他')}</td><td>${r.status}</td><td>${new Date(r.request_time).toLocaleString()}</td></tr>`; }); html += '</table></div>'; } else html += '<p>暂无记录</p>'; document.getElementById('historyArea').innerHTML = html; }
     function showFeedbackForm() { const now = Date.now(); if(now - lastFeedbackTime < 3600000) { alert('请等待1小时后再反馈'); return; } const html = `<h3>提交反馈</h3><textarea id="feedbackContent" rows="4" class="form-input" style="width:100%;margin:12px 0;" placeholder="请输入您的反馈..."></textarea><button class="btn-login" id="btnSubmitFeedback">提交</button><button class="btn-admin-outline mt-12" id="btnCancelFeedback">取消</button>`; showGeneralModal(html); document.getElementById('btnCancelFeedback').addEventListener('click', ()=> hideOverlay(generalOverlay)); document.getElementById('btnSubmitFeedback').addEventListener('click', async ()=>{ const content = document.getElementById('feedbackContent').value.trim(); if(!content) return alert('内容不能为空'); await supabase.from('feedbacks').insert({ username: currentUser.username, content }); lastFeedbackTime = Date.now(); hideOverlay(generalOverlay); alert('反馈已提交'); }); }
-    function showGiftDetail(seriesName, grade, cost) { currentGiftSeries = { seriesName, grade, cost }; const seriesBooks = booksData.filter(b => (b.series || getSeriesName(b.title)) === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, btnHTML; if (bookState === 'sent') { statusText = '已送出'; btnHTML = `<button class="btn-detail disabled">已送出</button>`; } else if (bookState === 'unavailable') { statusText = '不可兑换'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else if (bookState === 'upcoming') { statusText = '即将上架'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else { const canExchange = book.status === 'free'; statusText = canExchange ? '可兑换' : '不可兑换'; btnHTML = canExchange ? `<button class="btn-detail" data-action="exchange" data-id="${book.id}" data-cost="${cost}">兑换</button>` : `<button class="btn-detail disabled">不可兑换</button>`; } tableRows += `<tr><td>${book.title}</td><td>${statusText}</td><td>${btnHTML}</td></tr>`; }); readerContainer.innerHTML = `<div class="content-header"><h2>🎁 ${seriesName}</h2><button class="btn-admin-outline" id="btnBackGift">← 返回</button></div>${author ? `<p>作者：${author}</p>`:''}${notes ? `<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>状态</th><th>兑换</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackGift').addEventListener('click', ()=>{ currentGiftSeries = null; renderGiftHome(); }); bindAction('[data-action="exchange"]', async (e,btn)=>{ const bookId = btn.dataset.id; const requiredCost = parseInt(btn.dataset.cost); if(userFcoin < requiredCost) return alert('F币不足'); if(!confirm(`确定消耗 ${requiredCost} F币兑换此书吗？`)) return; const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); const newCoin = (user.fcoin||0) - requiredCost; if(newCoin < 0) return alert('F币不足'); const { error: fcoinError } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', currentUser.username); if(fcoinError) { alert('扣除F币失败'); return; } const book = getBookById(bookId); await supabase.from('messages').insert({ recipient: 'admin', sender: currentUser?.displayName||currentUser.username||'读者', content: `📦 兑换申请：用户 ${currentUser.username} 兑换了《${book?.title||'未知'}》（赠品等级 ${book?.grade||'未知'}），已扣除 ${requiredCost} F币。请前往管理端手动调整书籍状态。` }); await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'exchange', status: 'pending_admin', request_time: new Date().toISOString(), read: false }); await refreshAllData(); alert('兑换成功！已扣除F币，请等待管理员确认。'); renderGiftHome(); }); }
+    function showGiftDetail(seriesName, grade, cost) { currentGiftSeries = { seriesName, grade, cost }; const seriesBooks = booksData.filter(b => b.series === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, btnHTML; if (bookState === 'sent') { statusText = '已送出'; btnHTML = `<button class="btn-detail disabled">已送出</button>`; } else if (bookState === 'unavailable') { statusText = '不可兑换'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else if (bookState === 'upcoming') { statusText = '即将上架'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else { const canExchange = book.status === 'free'; statusText = canExchange ? '可兑换' : '不可兑换'; btnHTML = canExchange ? `<button class="btn-detail" data-action="exchange" data-id="${book.id}" data-cost="${cost}">兑换</button>` : `<button class="btn-detail disabled">不可兑换</button>`; } tableRows += `<tr><td>${book.title}</td><td>${statusText}</td><td>${btnHTML}</td></tr>`; }); readerContainer.innerHTML = `<div class="content-header"><h2>🎁 ${seriesName}</h2><button class="btn-admin-outline" id="btnBackGift">← 返回</button></div>${author ? `<p>作者：${author}</p>`:''}${notes ? `<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>状态</th><th>兑换</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackGift').addEventListener('click', ()=>{ currentGiftSeries = null; renderGiftHome(); }); bindAction('[data-action="exchange"]', async (e,btn)=>{ const bookId = btn.dataset.id; const requiredCost = parseInt(btn.dataset.cost); if(userFcoin < requiredCost) return alert('F币不足'); if(!confirm(`确定消耗 ${requiredCost} F币兑换此书吗？`)) return; const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); const newCoin = (user.fcoin||0) - requiredCost; if(newCoin < 0) return alert('F币不足'); const { error: fcoinError } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', currentUser.username); if(fcoinError) { alert('扣除F币失败'); return; } const book = getBookById(bookId); await supabase.from('messages').insert({ recipient: 'admin', sender: currentUser?.displayName||currentUser.username||'读者', content: `📦 兑换申请：用户 ${currentUser.username} 兑换了《${book?.title||'未知'}》（赠品等级 ${book?.grade||'未知'}），已扣除 ${requiredCost} F币。请前往管理端手动调整书籍状态。` }); await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'exchange', status: 'pending_admin', request_time: new Date().toISOString(), read: false }); await refreshAllData(); alert('兑换成功！已扣除F币，请等待管理员确认。'); renderGiftHome(); }); }
     function renderAboutPage() { readerContainer.innerHTML = `<div class="content-header"><h2>📖 关于我们</h2><button class="btn-admin-outline" id="btnBackAbout">← 返回</button></div><div style="line-height:1.8;"><p><strong>制作：</strong>星耀铁</p><p><strong>总监：</strong>梦语</p><p><strong>合作方：</strong>梦语、乐音恒</p><p><strong>合作工作室：</strong>梦语工作室、Lyinh工作室、米斯工作室</p><p><strong>感谢支持：</strong>周贤宇、梦语、Lyinh</p><hr><p><strong>注：</strong><br>星耀铁：米斯工作室<br>梦语：梦语工作室<br>乐音恒：乐音工作室</p><p><strong>星耀铁+梦语+乐音恒联合为：Lyinh工作室</strong></p><p><strong>Lyinh：</strong>乐游网（乐）、校园网（星）、棋艺网（梦）、仿易游戏（星）Lyinh书城（乐、星、梦）</p></div>`; siteFooter.style.display = 'none'; document.getElementById('btnBackAbout').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); }
 
     // ========== 读者端核心借阅逻辑 ==========
-    function showSeriesDetail(seriesName, grade) { const seriesBooks = booksData.filter(b => (b.series || getSeriesName(b.title)) === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, statusColor, btnHTML; if (bookState !== 'normal') { const stateMap = { 'unavailable':'不可借阅', 'upcoming':'即将上架', 'external':'外借' }; statusText = stateMap[bookState]||bookState; statusColor = bookState==='upcoming'?'color:#2980b9;':'color:#c0392b;'; if (bookState === 'external') { btnHTML = `<button class="btn-detail waiting" data-action="wait" data-id="${book.id}">候书</button>`; } else { btnHTML = `<button class="btn-detail disabled">不可借阅</button>`; } } else { const statusMap = { 'free':'空闲', 'borrowed':'已借出', 'pending_review':'审理中' }; statusText = statusMap[book.status]||book.status; const waitingCount = getWaitingCount(book.id); if (book.status==='free') statusColor = 'color:#27ae60; font-weight:bold;'; else if (book.status==='borrowed') statusColor = 'color:#c0392b;'; else if (book.status==='pending_review') statusColor = 'color:#e67e22;'; if (book.status==='borrowed' && waitingCount>0) statusText += ` (${waitingCount}人候)`; const myRes = getMyReservation(book.id); if (book.status==='free') btnHTML = `<button class="btn-detail" data-action="borrow" data-id="${book.id}">借阅</button>`; else if (book.status==='pending_review') btnHTML = myRes && myRes.status==='pending_review' ? '<span style="color:#e67e22;">正在审理中</span>' : `<button class="btn-detail" data-action="detail" data-id="${book.id}">详情/借阅</button>`; else if (book.status==='borrowed') { if (myRes && myRes.status==='waiting') btnHTML = `<button class="btn-detail waiting" data-action="cancelWait" data-id="${book.id}">已候</button>`; else if (canWait(book.id)) btnHTML = `<button class="btn-detail" data-action="wait" data-id="${book.id}">候书</button>`; else if (book.current_borrower===currentUser.username) btnHTML = '<span style="color:#888;">您正在借阅此书</span>'; else btnHTML = '<span style="color:#888;">不可候书</span>'; } } const myRes = getMyReservation(book.id); const notifDot = (myRes && (myRes.status==='approved'||myRes.status==='rejected') && !myRes.read) ? '<span class="red-dot"></span>' : ''; tableRows += `<tr><td>${book.title}${notifDot}</td><td><span style="${statusColor}">${statusText}</span></td><td>${btnHTML}</td></tr>`; }); const gradeNames = {'A':'A级','B':'B级','C':'C级','care':'爱护'}; readerContainer.innerHTML = `<div class="content-header"><h2>📖 ${seriesName} <small>${gradeNames[grade]}书目</small></h2><button class="btn-admin-outline" id="btnBackToList">← 返回</button></div>${author?`<p>作者：${author}</p>`:''}${notes?`<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>情况</th><th>借阅</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackToList').addEventListener('click', ()=>{ if(readerTab==='gift') renderGiftHome(); else renderCollectionHome(); }); bindAction('[data-action="borrow"]', (e,btn)=> borrowBook(btn.dataset.id)); bindAction('[data-action="wait"]', (e,btn)=> handleWaitBook(btn.dataset.id)); bindAction('[data-action="cancelWait"]', (e,btn)=> handleCancelWait(btn.dataset.id)); bindAction('.red-dot', ()=> showNotifications()); }
-    function borrowBook(bookId) { if (isSubmittingBorrow) { alert('请求正在处理中，请勿重复点击'); return; } const book = getBookById(bookId); if (!book || !canBorrow(bookId)) { alert('您已提交过借阅申请，或您正在借阅此书'); return; } const price = getPriceInfo(book.grade); const displayFiveDay = price.fiveDay==='免费'?'免费':price.fiveDay; const displayShort = price.short==='免费'?'免费':price.short; readerContainer.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:3em;">💳</div><h3>请用微信搜索：yyh20130917</h3><p>添加后备注来意并支付相关金额</p><div style="display:flex;gap:12px;justify-content:center;"><button class="btn-login" id="btnPlan5">5天款 (${displayFiveDay})</button><button class="btn-login" id="btnPlanShort">1天/3天款 (${displayShort})</button></div><button class="btn-admin-outline mt-12" id="btnCancelBorrow">取消</button></div>`; document.getElementById('btnCancelBorrow').addEventListener('click', ()=> { isSubmittingBorrow = false; showSeriesDetail(book.series || getSeriesName(book.title), book.grade); }); document.getElementById('btnPlan5').addEventListener('click', () => submitBorrowRequest(book, '5days')); document.getElementById('btnPlanShort').addEventListener('click', () => submitBorrowRequest(book, 'short')); }
+    function showSeriesDetail(seriesName, grade) {
+        const seriesBooks = booksData.filter(b => b.series === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)));
+        const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || '';
+        let tableRows = '';
+        seriesBooks.forEach(book => {
+            const bookState = book.state || 'normal'; let statusText, statusColor, btnHTML;
+            if (bookState !== 'normal') {
+                const stateMap = { 'unavailable':'不可借阅', 'upcoming':'即将上架', 'external':'外借' };
+                statusText = stateMap[bookState]||bookState;
+                statusColor = bookState==='upcoming'?'color:#2980b9;':'color:#c0392b;';
+                if (bookState === 'external') { btnHTML = `<button class="btn-detail waiting" data-action="wait" data-id="${book.id}">候书</button>`; }
+                else { btnHTML = `<button class="btn-detail disabled">不可借阅</button>`; }
+            } else {
+                const statusMap = { 'free':'空闲', 'borrowed':'已借出', 'pending_review':'审理中' };
+                statusText = statusMap[book.status]||book.status;
+                const waitingCount = getWaitingCount(book.id);
+                if (book.status==='free') statusColor = 'color:#27ae60; font-weight:bold;';
+                else if (book.status==='borrowed') statusColor = 'color:#c0392b;';
+                else if (book.status==='pending_review') statusColor = 'color:#e67e22;';
+                if (book.status==='borrowed' && waitingCount>0) statusText += ` (${waitingCount}人候)`;
+                const myRes = getMyReservation(book.id);
+                if (book.status==='free') btnHTML = `<button class="btn-detail" data-action="borrow" data-id="${book.id}">借阅</button>`;
+                else if (book.status==='pending_review') btnHTML = myRes && myRes.status==='pending_review' ? '<span style="color:#e67e22;">正在审理中</span>' : `<button class="btn-detail" data-action="detail" data-id="${book.id}">详情/借阅</button>`;
+                else if (book.status==='borrowed') {
+                    if (myRes && myRes.status==='waiting') btnHTML = `<button class="btn-detail waiting" data-action="cancelWait" data-id="${book.id}">已候</button>`;
+                    else if (canWait(book.id)) btnHTML = `<button class="btn-detail" data-action="wait" data-id="${book.id}">候书</button>`;
+                    else if (book.current_borrower===currentUser.username) btnHTML = '<span style="color:#888;">您正在借阅此书</span>';
+                    else btnHTML = '<span style="color:#888;">不可候书</span>';
+                }
+            }
+            const myRes = getMyReservation(book.id);
+            const notifDot = (myRes && (myRes.status==='approved'||myRes.status==='rejected') && !myRes.read) ? '<span class="red-dot"></span>' : '';
+            tableRows += `<tr><td>${book.title}${notifDot}</td><td><span style="${statusColor}">${statusText}</span></td><td>${btnHTML}</td></tr>`;
+        });
+        const gradeNames = {'A':'A级','B':'B级','C':'C级','care':'爱护'};
+        readerContainer.innerHTML = `<div class="content-header"><h2>📖 ${seriesName} <small>${gradeNames[grade]}书目</small></h2><button class="btn-admin-outline" id="btnBackToList">← 返回</button></div>${author?`<p>作者：${author}</p>`:''}${notes?`<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>情况</th><th>借阅</th></tr>${tableRows}</table></div>`;
+        document.getElementById('btnBackToList').addEventListener('click', ()=>{ if(readerTab==='gift') renderGiftHome(); else renderCollectionHome(); });
+        bindAction('[data-action="borrow"]', (e,btn)=> borrowBook(btn.dataset.id));
+        bindAction('[data-action="wait"]', (e,btn)=> handleWaitBook(btn.dataset.id));
+        bindAction('[data-action="cancelWait"]', (e,btn)=> handleCancelWait(btn.dataset.id));
+        bindAction('.red-dot', ()=> showNotifications());
+    }
+    function borrowBook(bookId) { if (isSubmittingBorrow) { alert('请求正在处理中，请勿重复点击'); return; } const book = getBookById(bookId); if (!book || !canBorrow(bookId)) { alert('您已提交过借阅申请，或您正在借阅此书'); return; } const price = getPriceInfo(book.grade); const displayFiveDay = price.fiveDay==='免费'?'免费':price.fiveDay; const displayShort = price.short==='免费'?'免费':price.short; readerContainer.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:3em;">💳</div><h3>请用微信搜索：yyh20130917</h3><p>添加后备注来意并支付相关金额</p><div style="display:flex;gap:12px;justify-content:center;"><button class="btn-login" id="btnPlan5">5天款 (${displayFiveDay})</button><button class="btn-login" id="btnPlanShort">1天/3天款 (${displayShort})</button></div><button class="btn-admin-outline mt-12" id="btnCancelBorrow">取消</button></div>`; document.getElementById('btnCancelBorrow').addEventListener('click', ()=> { isSubmittingBorrow = false; showSeriesDetail(book.series, book.grade); }); document.getElementById('btnPlan5').addEventListener('click', () => submitBorrowRequest(book, '5days')); document.getElementById('btnPlanShort').addEventListener('click', () => submitBorrowRequest(book, 'short')); }
     async function submitBorrowRequest(book, borrowType) { if (isSubmittingBorrow) return; isSubmittingBorrow = true; if (!canBorrow(book.id)) { alert('您已提交过借阅申请'); isSubmittingBorrow = false; return; } const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'borrow', status: 'pending_review', request_time: new Date().toISOString(), borrow_type: borrowType, read: false }); if (!error) { await supabase.from('books').update({ status: 'pending_review' }).eq('id', book.id); await refreshAllData(); renderCollectionHome(); } else alert('提交失败'); isSubmittingBorrow = false; }
     function canBorrow(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state && book.state !== 'normal') return false; if (book.status === 'free') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); }
     function canWait(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state === 'external') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); if (book.status !== 'borrowed') return false; if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); }
-    async function handleWaitBook(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; if (!canWait(bookId)) { const book = getBookById(bookId); if (book && book.state === 'external' && reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting')) { alert('您已候过此书'); } else { alert('无法候书'); } return; } const book = getBookById(bookId); const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'wait', status: 'waiting', request_time: new Date().toISOString(), read: false }); if (!error) { await refreshAllData(); showSeriesDetail(book.series || getSeriesName(book.title), book.grade); } else alert('操作失败'); }
-    async function handleCancelWait(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; const myRes = getMyReservation(bookId); if (myRes && myRes.status === 'waiting') { await supabase.from('reservations').update({ status: 'cancelled' }).eq('id', myRes.id); await refreshAllData(); const book = getBookById(bookId); showSeriesDetail(book.series || getSeriesName(book.title), book.grade); } }
+    async function handleWaitBook(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; if (!canWait(bookId)) { const book = getBookById(bookId); if (book && book.state === 'external' && reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting')) { alert('您已候过此书'); } else { alert('无法候书'); } return; } const book = getBookById(bookId); const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'wait', status: 'waiting', request_time: new Date().toISOString(), read: false }); if (!error) { await refreshAllData(); showSeriesDetail(book.series, book.grade); } else alert('操作失败'); }
+    async function handleCancelWait(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; const myRes = getMyReservation(bookId); if (myRes && myRes.status === 'waiting') { await supabase.from('reservations').update({ status: 'cancelled' }).eq('id', myRes.id); await refreshAllData(); const book = getBookById(bookId); showSeriesDetail(book.series, book.grade); } }
     function showNotifications() { const notifs = getMyNotifications(); if (!notifs.length) { alert('暂无新通知'); return; } let html = '<h3 style="color:var(--deep-blue);">📬 通知</h3>'; notifs.forEach(n => { const book = getBookById(n.book_id); const title = book ? book.title : '未知'; if (n.status === 'approved') html += `<div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>✅ ${title}</strong><br>已通过审理<br>${n.return_time ? '应归还时间：'+new Date(n.return_time).toLocaleDateString() : ''}</div>`; else if (n.status === 'rejected') html += `<div style="background:#fdecea;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>❌ ${title}</strong><br>已被拒绝<br>原因：${n.reject_reason||'未说明'}</div>`; }); html += `<button class="btn-login mt-12" id="btnMarkAllRead">全部标为已读</button>`; showGeneralModal(html); document.getElementById('btnMarkAllRead').addEventListener('click', async ()=>{ for (const n of notifs) await supabase.from('reservations').update({ read: true }).eq('id', n.id); await refreshAllData(); hideOverlay(generalOverlay); renderCollectionHome(); }); }
     function showGeneralModal(innerHTML, maxWidth = '500px') { generalCard.innerHTML = innerHTML + `<div style="text-align:center;margin-top:16px;"><button class="btn-admin-outline" id="btnCloseGeneral">关闭</button></div>`; generalCard.style.maxWidth = maxWidth; generalOverlay.classList.add('show'); document.getElementById('btnCloseGeneral').addEventListener('click', () => { generalOverlay.classList.remove('show'); generalCard.style.maxWidth = '500px'; }); }
     function hideOverlay(el) { el.classList.remove('show'); }
@@ -646,7 +705,7 @@
             const gradeBooks = booksData.filter(b => b.grade === grade);
             if (!gradeBooks.length) return;
             const seriesMap = new Map();
-            gradeBooks.forEach(b => { const sn = b.series || getSeriesName(b.title); if (!seriesMap.has(sn)) seriesMap.set(sn, []); seriesMap.get(sn).push(b); });
+            gradeBooks.forEach(b => { const s = b.series || '未分类'; if (!seriesMap.has(s)) seriesMap.set(s, []); seriesMap.get(s).push(b); });
             html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade === 'care' ? '爱护' : grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`;
             seriesMap.forEach((vols, seriesName) => { const count = vols.length; html += `<li class="book-item"><span class="book-name">${seriesName} ${count > 1 ? `1-${count}册` : ''}</span><button class="edit-book-btn" data-series="${seriesName}" data-grade="${grade}">编辑此书</button></li>`; });
             html += `</ul></div>`;
@@ -666,7 +725,7 @@
             const gradeBooks = booksData.filter(b => b.grade === grade);
             if (!gradeBooks.length) return;
             const seriesMap = new Map();
-            gradeBooks.forEach(b => { const sn = b.series || getSeriesName(b.title); if (!seriesMap.has(sn)) seriesMap.set(sn, []); seriesMap.get(sn).push(b); });
+            gradeBooks.forEach(b => { const s = b.series || '未分类'; if (!seriesMap.has(s)) seriesMap.set(s, []); seriesMap.get(s).push(b); });
             html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade === 'gift-A' ? '1' : grade === 'gift-B' ? '2' : '3'}级</span> ${giftNames[grade]}</div><ul class="book-list">`;
             seriesMap.forEach((vols, seriesName) => { const count = vols.length; html += `<li class="book-item"><span class="book-name">${seriesName} ${count > 1 ? `1-${count}册` : ''}</span><button class="edit-book-btn" data-series="${seriesName}" data-grade="${grade}">编辑此书</button></li>`; });
             html += `</ul></div>`;
@@ -682,7 +741,20 @@
         const html = `<h3>添加新书系列</h3><div><label>书籍名称：<input id="newSeriesName" class="form-input"></label></div><div><label>分级：<select id="newSeriesGrade" class="form-input">${options}</select></label></div><div><label>作者：<input id="newSeriesAuthor" class="form-input"></label></div><div><label>注意事项：<input id="newSeriesNotes" class="form-input"></label></div><div><label>分册数量：<input id="newSeriesVolumes" type="number" min="1" value="1" class="form-input" style="width:80px;"></label></div><button class="btn-login" id="btnCreateSeries">创建</button><button class="btn-admin-outline mt-12" id="btnCancelAdd">取消</button>`;
         showGeneralModal(html);
         document.getElementById('btnCancelAdd').addEventListener('click', () => hideOverlay(generalOverlay));
-        document.getElementById('btnCreateSeries').addEventListener('click', async () => { const name = document.getElementById('newSeriesName').value.trim(); if (!name) return alert('请输入书名'); const grade = document.getElementById('newSeriesGrade').value; const author = document.getElementById('newSeriesAuthor').value.trim(); const notes = document.getElementById('newSeriesNotes').value.trim(); const volumes = parseInt(document.getElementById('newSeriesVolumes').value) || 1; const seriesName = `《${name}》`; const booksToInsert = []; for (let i = 1; i <= volumes; i++) booksToInsert.push({ title: volumes > 1 ? `${seriesName}${i}` : seriesName, grade, status: 'free', state: 'normal', author, notes, series: seriesName }); const { error } = await supabase.from('books').insert(booksToInsert); if (error) alert('创建失败'); else { await refreshAllData(); hideOverlay(generalOverlay); renderEditBooks(); } });
+        document.getElementById('btnCreateSeries').addEventListener('click', async () => {
+            const name = document.getElementById('newSeriesName').value.trim();
+            if (!name) return alert('请输入书名');
+            const grade = document.getElementById('newSeriesGrade').value;
+            const author = document.getElementById('newSeriesAuthor').value.trim();
+            const notes = document.getElementById('newSeriesNotes').value.trim();
+            const volumes = parseInt(document.getElementById('newSeriesVolumes').value) || 1;
+            const seriesName = `《${name}》`;
+            const booksToInsert = [];
+            for (let i = 1; i <= volumes; i++) booksToInsert.push({ title: volumes > 1 ? `${seriesName}${i}` : seriesName, grade, status: 'free', state: 'normal', author, notes, series: seriesName });
+            const { error } = await supabase.from('books').insert(booksToInsert);
+            if (error) alert('创建失败');
+            else { await refreshAllData(); hideOverlay(generalOverlay); renderEditBooks(); }
+        });
     }
 
     function showAddGiftSeriesForm() {
@@ -690,12 +762,25 @@
         const html = `<h3>添加新赠品系列</h3><div><label>书籍名称：<input id="newGiftName" class="form-input"></label></div><div><label>等级：<select id="newGiftGrade" class="form-input">${options}</select></label></div><div><label>作者：<input id="newGiftAuthor" class="form-input"></label></div><div><label>注意事项：<input id="newGiftNotes" class="form-input"></label></div><div><label>分册数量：<input id="newGiftVolumes" type="number" min="1" value="1" class="form-input" style="width:80px;"></label></div><button class="btn-login" id="btnCreateGiftSeries">创建</button><button class="btn-admin-outline mt-12" id="btnCancelAddGift">取消</button>`;
         showGeneralModal(html);
         document.getElementById('btnCancelAddGift').addEventListener('click', () => hideOverlay(generalOverlay));
-        document.getElementById('btnCreateGiftSeries').addEventListener('click', async () => { const name = document.getElementById('newGiftName').value.trim(); if (!name) return alert('请输入书名'); const grade = document.getElementById('newGiftGrade').value; const author = document.getElementById('newGiftAuthor').value.trim(); const notes = document.getElementById('newGiftNotes').value.trim(); const volumes = parseInt(document.getElementById('newGiftVolumes').value) || 1; const seriesName = `《${name}》`; const booksToInsert = []; for (let i = 1; i <= volumes; i++) booksToInsert.push({ title: volumes > 1 ? `${seriesName}${i}` : seriesName, grade, status: 'free', state: 'normal', author, notes, series: seriesName }); const { error } = await supabase.from('books').insert(booksToInsert); if (error) alert('创建失败'); else { await refreshAllData(); hideOverlay(generalOverlay); renderEditGifts(); } });
+        document.getElementById('btnCreateGiftSeries').addEventListener('click', async () => {
+            const name = document.getElementById('newGiftName').value.trim();
+            if (!name) return alert('请输入书名');
+            const grade = document.getElementById('newGiftGrade').value;
+            const author = document.getElementById('newGiftAuthor').value.trim();
+            const notes = document.getElementById('newGiftNotes').value.trim();
+            const volumes = parseInt(document.getElementById('newGiftVolumes').value) || 1;
+            const seriesName = `《${name}》`;
+            const booksToInsert = [];
+            for (let i = 1; i <= volumes; i++) booksToInsert.push({ title: volumes > 1 ? `${seriesName}${i}` : seriesName, grade, status: 'free', state: 'normal', author, notes, series: seriesName });
+            const { error } = await supabase.from('books').insert(booksToInsert);
+            if (error) alert('创建失败');
+            else { await refreshAllData(); hideOverlay(generalOverlay); renderEditGifts(); }
+        });
     }
 
     function showSeriesEdit(seriesName, grade) {
-        // 使用 series 字段或 getSeriesName 查找系列
-        const seriesBooks = booksData.filter(b => (b.series || getSeriesName(b.title)) === seriesName && b.grade === grade).sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0))));
+        // 使用 series 字段查找系列书籍
+        const seriesBooks = booksData.filter(b => b.series === seriesName && b.grade === grade).sort((a, b) => (parseInt(a.title.match(/\d+$/)?.[0] || 0) - (parseInt(b.title.match(/\d+$/)?.[0] || 0))));
         const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || '';
         const isGift = grade.startsWith('gift-');
         const gradeNames = { 'A': 'A级', 'B': 'B级', 'C': 'C级', 'care': '爱护', 'gift-A': '1级赠品', 'gift-B': '2级赠品', 'gift-C': '3级赠品' };
@@ -721,7 +806,6 @@
     function deleteSeries(seriesName, grade) {
         const isGift = grade.startsWith('gift-');
         if (!confirm(`确定要删除【${seriesName}】系列的所有书籍吗？此操作不可恢复！`)) return;
-        // 删除该系列的所有书籍
         supabase.from('books').delete().eq('series', seriesName).eq('grade', grade).then(async ({ error }) => {
             if (error) { alert('删除失败：' + error.message); return; }
             await refreshAllData();
@@ -745,11 +829,11 @@
     }
 
     function addVolume(seriesName, grade) {
-        const currentCount = booksData.filter(b => (b.series || getSeriesName(b.title)) === seriesName && b.grade === grade).length;
+        const currentCount = booksData.filter(b => b.series === seriesName && b.grade === grade).length;
         const volumeNum = currentCount + 1;
         const html = `<h3>添加分册</h3><p>第 ${volumeNum} 册</p><button class="btn-login" id="btnConfirmAddVolume">确认</button>`;
         showGeneralModal(html);
-        document.getElementById('btnConfirmAddVolume').addEventListener('click', async () => { const newTitle = currentCount > 0 ? `${seriesName}${volumeNum}` : seriesName; const firstBook = booksData.find(b => (b.series || getSeriesName(b.title)) === seriesName && b.grade === grade); const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; const { error } = await supabase.from('books').insert({ title: newTitle, grade, status: 'free', state: 'normal', author, notes, series: seriesName }); if (error) alert('添加失败'); else { await refreshAllData(); hideOverlay(generalOverlay); showSeriesEdit(seriesName, grade); } });
+        document.getElementById('btnConfirmAddVolume').addEventListener('click', async () => { const newTitle = currentCount > 0 ? `${seriesName}${volumeNum}` : seriesName; const firstBook = booksData.find(b => b.series === seriesName && b.grade === grade); const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; const { error } = await supabase.from('books').insert({ title: newTitle, grade, status: 'free', state: 'normal', author, notes, series: seriesName }); if (error) alert('添加失败'); else { await refreshAllData(); hideOverlay(generalOverlay); showSeriesEdit(seriesName, grade); } });
     }
 
     function editVolume(bookId, seriesName, grade) {
@@ -769,7 +853,7 @@
             const newTitle = document.getElementById('editVolumeTitle').value.trim();
             const newState = document.getElementById('editVolumeState').value;
             if (!newTitle) return alert('书名不能为空');
-            // 更新书名和状态，系列不变
+            // 更新书名和状态，series 字段不变
             await supabase.from('books').update({ title: newTitle, state: newState }).eq('id', bookId);
             await refreshAllData();
             hideOverlay(generalOverlay);
