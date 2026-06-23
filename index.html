@@ -38,6 +38,7 @@
         .form-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(10,37,64,0.1); background:#fff; }
         .btn-login { width:100%; padding:15px; font-weight:600; background:var(--deep-blue); color:#fff; border:none; border-radius:10px; cursor:pointer; }
         .btn-login:hover { background:#1e3a5f; }
+        .btn-login:disabled { opacity:0.6; cursor:not-allowed; }
         .error-message { text-align:center; color:var(--error); font-size:0.85em; min-height:22px; }
         .footer-note { text-align:center; margin-top:24px; font-size:0.8em; color:#8f9bb3; }
 
@@ -216,14 +217,7 @@
     function loadSession() { const raw = localStorage.getItem(SESSION_KEY); if(!raw) return null; const s = JSON.parse(raw); if(Date.now()-s.ts > 86400000) { localStorage.removeItem(SESSION_KEY); return null; } return s; }
     function clearSession() { localStorage.removeItem(SESSION_KEY); }
 
-    async function loadBooks() {
-        const {data} = await supabase.from('books').select('*').order('title');
-        if(data) {
-            // 自动修复：若系列字段为空，则根据书名填入
-            data.forEach(b => { if(!b.series) b.series = getSeriesName(b.title); });
-            booksData = data;
-        }
-    }
+    async function loadBooks() { const {data} = await supabase.from('books').select('*').order('title'); if(data) booksData = data; }
     async function loadReservations() { if(!currentUser) return; const {data} = await supabase.from('reservations').select('*').order('request_time',{ascending:true}); if(data) reservationsData = data; }
     async function loadAnnouncements() {
         const { data: d1 } = await supabase.from('announcements').select('content').eq('id',1).single();
@@ -239,7 +233,6 @@
     async function loadSiteStatus() { const { data } = await supabase.from('site_status').select('status').single(); if (data) siteStatus = data.status; updateLoginUIByStatus(); }
     async function refreshAllData() { await Promise.all([loadBooks(), loadReservations(), loadAnnouncements(), loadUserFcoin(), loadPricing(), loadSiteStatus()]); }
 
-    // 辅助函数：从书名计算系列名（仅用于老数据修复，后续不再用于分组）
     function getSeriesName(title) { return title.replace(/[0-9]+$/,'').trim(); }
 
     function updateLoginUIByStatus() {
@@ -249,6 +242,9 @@
             case 'running':
                 body.style.background = 'linear-gradient(180deg, var(--deep-blue) 0%, var(--deep-blue) 20%, #f4f6f9 20%, #f4f6f9 100%)';
                 loginStatusMsg.innerHTML = ''; break;
+            case 'updating':
+                body.style.background = 'linear-gradient(180deg, #27ae60 0%, #27ae60 20%, #f4f6f9 20%, #f4f6f9 100%)';
+                loginStatusMsg.style.display = 'block'; loginStatusMsg.innerHTML = '🔄 目前网站正在更新中，请稍后再来。'; break;
             case 'repair':
                 body.style.background = 'linear-gradient(180deg, #e67e22 0%, #e67e22 20%, #f4f6f9 20%, #f4f6f9 100%)';
                 loginStatusMsg.style.display = 'block'; loginStatusMsg.innerHTML = '⚠️ 正在维修中，请稍后再试……'; break;
@@ -267,18 +263,9 @@
         realtimeChannel = supabase.channel('lyinh-realtime')
             .on('postgres_changes', {event:'*', schema:'public', table:'books'}, ()=>refreshAllData().then(updateUI))
             .on('postgres_changes', {event:'*', schema:'public', table:'reservations'}, ()=>refreshAllData().then(updateUI))
-            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{
-                popupAnnouncementContent = payload.new.content;
-                updatePopupAnnouncementUI();
-            })
-            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.2'}, payload=>{
-                scrollAnnouncementContent = payload.new.content;
-                updateScrollAnnouncementUI();
-            })
-            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.3'}, payload=>{
-                loginAnnouncementContent = payload.new.content;
-                updateLoginScroll();
-            })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.1'}, payload=>{ popupAnnouncementContent = payload.new.content; updatePopupAnnouncementUI(); })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.2'}, payload=>{ scrollAnnouncementContent = payload.new.content; updateScrollAnnouncementUI(); })
+            .on('postgres_changes', {event:'UPDATE', schema:'public', table:'announcements', filter:'id=eq.3'}, payload=>{ loginAnnouncementContent = payload.new.content; updateLoginScroll(); })
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'app_users', filter:`username=eq.${currentUser?.username}`}, payload=>{ userFcoin = payload.new.fcoin||0; fcoinDisplay.textContent = `🪙 ${userFcoin}`; if(currentUser?.role==='reader' && readerTab==='gift' && readerContentArea.classList.contains('show')) renderGiftHome(); })
             .on('postgres_changes', {event:'*', schema:'public', table:'pricing'}, () => { loadPricing(); })
             .on('postgres_changes', {event:'UPDATE', schema:'public', table:'site_status'}, () => { loadSiteStatus(); })
@@ -356,11 +343,47 @@
     function bindAction(selector, callback) { document.querySelectorAll(selector).forEach(el => { const handler = (e) => { e.preventDefault(); e.stopPropagation(); callback(e, el); }; el.removeEventListener('click', handler); el.removeEventListener('touchend', handler); el.addEventListener('click', handler); el.addEventListener('touchend', handler, { passive: false }); }); }
 
     // ========== 登录处理 ==========
-    document.getElementById('btnLogin').addEventListener('click', async (e)=>{ e.preventDefault(); errorMsgEl.textContent = ''; const u = usernameInput.value.trim(), p = passwordInput.value.trim(); if(!u||!p) { errorMsgEl.textContent='请输入用户名和密码'; return; } if(!supabase && !initSupabase()) { errorMsgEl.textContent='初始化失败'; return; } const btn = document.getElementById('btnLogin'); btn.disabled = true; try { const hash = await sha256(p); const { data: users } = await supabase.from('app_users').select('*').eq('username', u).limit(1); if(!users?.length || users[0].password_hash !== hash) { errorMsgEl.textContent='用户名或密码错误'; btn.disabled = false; return; } const user = users[0]; if (user.role === 'reader' && siteStatus !== 'running') { loginStatusMsg.style.display = 'block'; btn.disabled = false; return; } handleLoginImmediate(user.username, user.role, user.display_name); } catch(err) { errorMsgEl.textContent='网络错误'; } finally { btn.disabled = false; } });
+    document.getElementById('btnLogin').addEventListener('click', async (e)=>{
+        e.preventDefault(); errorMsgEl.textContent = '';
+        const u = usernameInput.value.trim(), p = passwordInput.value.trim();
+        if(!u||!p) { errorMsgEl.textContent='请输入用户名和密码'; return; }
+        if(!supabase && !initSupabase()) { errorMsgEl.textContent='初始化失败'; return; }
+        const btn = document.getElementById('btnLogin'); btn.disabled = true;
+        try {
+            const hash = await sha256(p);
+            const { data: users } = await supabase.from('app_users').select('*').eq('username', u).limit(1);
+            if(!users?.length || users[0].password_hash !== hash) { errorMsgEl.textContent='用户名或密码错误'; btn.disabled = false; return; }
+            const user = users[0];
+            if (user.role === 'reader' && siteStatus !== 'running') {
+                loginStatusMsg.style.display = 'block'; btn.disabled = false; return;
+            }
+            // 记录登录历史
+            await supabase.from('login_history').insert({ username: user.username });
+            handleLoginImmediate(user.username, user.role, user.display_name);
+        } catch(err) { errorMsgEl.textContent='网络错误'; }
+        finally { btn.disabled = false; }
+    });
 
-    async function handleLoginImmediate(username, role, displayName) { currentUser = { username, role, displayName }; if(rememberCheckbox.checked) saveSession(username, role, displayName); setupRealtime(); loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none'; if(role === 'reader') { fcoinDisplay.style.display = 'block'; announceOverlay.classList.add('show'); popupContent.textContent = '加载中...'; refreshAllData().then(() => { popupContent.textContent = popupAnnouncementContent; }); } else { adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`; btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); }; } }
+    async function handleLoginImmediate(username, role, displayName) {
+        currentUser = { username, role, displayName };
+        if(rememberCheckbox.checked) saveSession(username, role, displayName);
+        setupRealtime();
+        loginWrapper.style.opacity='0'; loginWrapper.style.pointerEvents='none';
+        if(role === 'reader') {
+            fcoinDisplay.style.display = 'block';
+            announceOverlay.classList.add('show'); popupContent.textContent = '加载中...';
+            refreshAllData().then(() => { popupContent.textContent = popupAnnouncementContent; });
+        } else {
+            adminSuccessOverlay.classList.add('show'); adminSuccessMsg.textContent = `欢迎，${displayName||username}`;
+            btnCloseAdminSuccess.onclick = () => { adminSuccessOverlay.classList.remove('show'); adminContentArea.classList.add('show'); refreshAllData().then(() => renderAdminPanel()); };
+        }
+    }
 
-    btnCloseAnnounce.addEventListener('click', () => { announceOverlay.classList.remove('show'); readerContentArea.classList.add('show'); renderCollectionHome(); });
+    btnCloseAnnounce.addEventListener('click', () => {
+        announceOverlay.classList.remove('show');
+        readerContentArea.classList.add('show');
+        renderCollectionHome();
+    });
 
     function logout() { if(realtimeChannel) supabase.removeChannel(realtimeChannel); realtimeChannel = null; clearSession(); currentUser = null; booksData = []; reservationsData = []; hideAll(); fcoinDisplay.style.display = 'none'; }
 
@@ -374,16 +397,7 @@
         let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>📚 书馆藏品</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnNotifications">🔔 通知</button><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
         <div class="tabs"><button class="tab-btn active" id="tabCollection">藏品</button><button class="tab-btn" id="tabGift">赠品</button></div>
         <div class="announcement-scroll"><span class="scroll-text" id="readerScrollAnnouncement">${scrollAnnouncementContent}</span></div>`;
-        gradeOrder.forEach(grade=>{
-            const gradeBooks = booksData.filter(b=>b.grade===grade);
-            if(!gradeBooks.length) return;
-            const seriesMap = new Map();
-            // 核心：使用 book.series 进行分组
-            gradeBooks.forEach(b=>{ const s = b.series || '未分类'; if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); });
-            html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`;
-            seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; });
-            html += `</ul></div>`;
-        });
+        gradeOrder.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const s = b.series || getSeriesName(b.title); if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); }); html += `<div class="grade-section ${gradeCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='care'?'爱护':grade}级</span> ${gradeNames[grade]}</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="btn-detail" data-series="${seriesName}" data-grade="${grade}">详情/借阅</button></li>`; }); html += `</ul></div>`; });
         readerContainer.innerHTML = html;
         siteFooter.style.display = 'block';
         document.getElementById('tabCollection').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
@@ -401,16 +415,13 @@
         startAnnounceScroll(document.getElementById('readerScrollAnnouncement'));
     }
 
-// ========== 第二部分 紧接第一部分末尾 ==========
-
-    // ========== 读者界面渲染（续） ==========
     function renderGiftHome() {
         currentGiftSeries = null;
         const giftGrades = ['gift-A','gift-B','gift-C']; const giftNames = {'gift-A':'1级赠品','gift-B':'2级赠品','gift-C':'3级赠品'}; const giftCSS = {'gift-A':'gift-a','gift-B':'gift-b','gift-C':'gift-c'}; const costs = { 'gift-A':30, 'gift-B':50, 'gift-C':80 };
         let html = `<div class="content-header"><div class="header-left"><button class="btn-mail" id="btnMail"><span id="mailDot" class="mail-dot"></span>📬</button><h2>🎁 赠品中心</h2></div><div class="settings-wrapper"><button class="btn-settings" id="btnSettings">⚙️ 更多</button><div class="settings-dropdown" id="settingsDropdown"><button id="btnReaderLogout">退出登录</button><button id="btnFeedback">📝 反馈</button><button id="btnProfile">👤 我的</button></div></div></div>
         <div class="tabs"><button class="tab-btn" id="tabCollection">藏品</button><button class="tab-btn active" id="tabGift">赠品</button></div>
         <div style="background:#fef9e7;padding:12px;border-radius:8px;margin-bottom:16px;"><p>💰 我的F币：<strong id="giftFcoinDisplay">${userFcoin}</strong></p></div>`;
-        giftGrades.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const s = b.series || '未分类'; if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); }); const canAfford = userFcoin >= costs[grade]; html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='gift-A'?'1':grade==='gift-B'?'2':'3'}级</span> ${giftNames[grade]} (需${costs[grade]}币)</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; const btnClass = canAfford ? 'btn-detail' : 'btn-detail disabled'; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="${btnClass}" data-series="${seriesName}" data-grade="${grade}" data-cost="${costs[grade]}">详情/兑换</button></li>`; }); html += `</ul></div>`; });
+        giftGrades.forEach(grade=>{ const gradeBooks = booksData.filter(b=>b.grade===grade); if(!gradeBooks.length) return; const seriesMap = new Map(); gradeBooks.forEach(b=>{ const s = b.series || getSeriesName(b.title); if(!seriesMap.has(s)) seriesMap.set(s,[]); seriesMap.get(s).push(b); }); const canAfford = userFcoin >= costs[grade]; html += `<div class="grade-section ${giftCSS[grade]}"><div class="grade-label"><span class="badge">${grade==='gift-A'?'1':grade==='gift-B'?'2':'3'}级</span> ${giftNames[grade]} (需${costs[grade]}币)</div><ul class="book-list">`; seriesMap.forEach((vols, seriesName)=>{ const count = vols.length; const note = count>1 ? `1-${count}册` : ''; const btnClass = canAfford ? 'btn-detail' : 'btn-detail disabled'; html += `<li class="book-item"><span class="book-name">${seriesName} ${note ? `<small>${note}</small>` : ''}</span><button class="${btnClass}" data-series="${seriesName}" data-grade="${grade}" data-cost="${costs[grade]}">详情/兑换</button></li>`; }); html += `</ul></div>`; });
         readerContainer.innerHTML = html;
         siteFooter.style.display = 'block';
         document.getElementById('giftFcoinDisplay').textContent = userFcoin;
@@ -427,14 +438,110 @@
         updateMailDot();
     }
 
-    function renderMailPage() { readerContainer.innerHTML = `<div class="content-header"><h2>📬 邮箱</h2><button class="btn-admin-outline" id="btnBackReader">← 返回</button></div><div id="mailList">加载中...</div>`; document.getElementById('btnBackReader').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); loadMails(); }
-    async function loadMails() { if(!currentUser) return; try { const {data} = await supabase.from('messages').select('*').eq('recipient', currentUser.username).order('created_at', {ascending: false}); let html = ''; if(data && data.length>0) { data.forEach(m => { html += `<div style="background:#f8f9fb;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid var(--deep-blue);"><p style="font-weight:600;">${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small></div>`; }); } else html = '<p>暂无邮件</p>'; document.getElementById('mailList').innerHTML = html; await supabase.from('messages').update({ read: true }).eq('recipient', currentUser.username).eq('read', false); updateMailDot(); } catch(e) { console.error(e); } }
+    function renderMailPage() {
+        let html = `<div class="content-header"><h2>📬 邮箱</h2><button class="btn-admin-outline" id="btnBackReader">← 返回</button></div>
+        <div style="display:flex; gap:12px; margin-bottom:12px;"><button class="btn-sm btn-reject" id="btnClearAllMails">🗑️ 清空所有邮件</button></div>
+        <div id="mailList">加载中...</div>`;
+        readerContainer.innerHTML = html;
+        document.getElementById('btnBackReader').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
+        document.getElementById('btnClearAllMails').addEventListener('click', async ()=>{
+            if(!confirm('确定要删除所有邮件吗？此操作不可恢复！')) return;
+            try { await supabase.from('messages').delete().eq('recipient', currentUser.username); loadMails(); } catch(e) { alert('操作失败'); }
+        });
+        loadMails();
+    }
 
-    function renderProfilePage() { readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>`; supabase.from('app_users').select('display_name').eq('username', currentUser.username).single().then(({data})=>{ const displayName = data?.display_name || currentUser.username; let html = `<div class="profile-info" style="background:#f9fafc;border-radius:12px;padding:20px;margin-bottom:24px;"><h3>${displayName}</h3><p>用户名：${currentUser.username}</p><p>F币余额：${userFcoin}</p></div>`; html += `<button class="btn-login" id="btnBorrowHistory">📖 借阅记录</button>`; html += `<div id="historyArea" class="mt-16"></div>`; readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>` + html; document.getElementById('btnBackProfile').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); document.getElementById('btnBorrowHistory').addEventListener('click', showBorrowHistory); }).catch(e=>console.error(e)); }
-    async function showBorrowHistory() { try { const {data: history} = await supabase.from('reservations').select('*, books(title)').eq('username', currentUser.username).order('request_time', {ascending: false}); let html = '<h3>📖 借阅/候书记录</h3>'; if (history && history.length > 0) { html += '<div class="table-wrap"><table><tr><th>书名</th><th>类型</th><th>状态</th><th>时间</th></tr>'; history.forEach(r => { html += `<tr><td>${r.books?.title||'未知'}</td><td>${r.type==='borrow'?'借阅':(r.type==='wait'?'候书':'其他')}</td><td>${r.status}</td><td>${new Date(r.request_time).toLocaleString()}</td></tr>`; }); html += '</table></div>'; } else html += '<p>暂无记录</p>'; document.getElementById('historyArea').innerHTML = html; } catch(e) { console.error(e); } }
-    function showFeedbackForm() { const now = Date.now(); if(now - lastFeedbackTime < 3600000) { alert('请等待1小时后再反馈'); return; } const html = `<h3>提交反馈</h3><textarea id="feedbackContent" rows="4" class="form-input" style="width:100%;margin:12px 0;" placeholder="请输入您的反馈..."></textarea><button class="btn-login" id="btnSubmitFeedback">提交</button><button class="btn-admin-outline mt-12" id="btnCancelFeedback">取消</button>`; showGeneralModal(html); document.getElementById('btnCancelFeedback').addEventListener('click', ()=> hideOverlay(generalOverlay)); document.getElementById('btnSubmitFeedback').addEventListener('click', async ()=>{ const content = document.getElementById('feedbackContent').value.trim(); if(!content) return alert('内容不能为空'); try { await supabase.from('feedbacks').insert({ username: currentUser.username, content }); lastFeedbackTime = Date.now(); hideOverlay(generalOverlay); alert('反馈已提交'); } catch(e) { alert('提交失败'); } }); }
-    function showGiftDetail(seriesName, grade, cost) { currentGiftSeries = { seriesName, grade, cost }; const seriesBooks = booksData.filter(b => b.series === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0)))); const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || ''; let tableRows = ''; seriesBooks.forEach(book => { const bookState = book.state || 'normal'; let statusText, btnHTML; if (bookState === 'sent') { statusText = '已送出'; btnHTML = `<button class="btn-detail disabled">已送出</button>`; } else if (bookState === 'unavailable') { statusText = '不可兑换'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else if (bookState === 'upcoming') { statusText = '即将上架'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; } else { const canExchange = book.status === 'free'; statusText = canExchange ? '可兑换' : '不可兑换'; btnHTML = canExchange ? `<button class="btn-detail" data-action="exchange" data-id="${book.id}" data-cost="${cost}">兑换</button>` : `<button class="btn-detail disabled">不可兑换</button>`; } tableRows += `<tr><td>${book.title}</td><td>${statusText}</td><td>${btnHTML}</td></tr>`; }); readerContainer.innerHTML = `<div class="content-header"><h2>🎁 ${seriesName}</h2><button class="btn-admin-outline" id="btnBackGift">← 返回</button></div>${author ? `<p>作者：${author}</p>`:''}${notes ? `<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>状态</th><th>兑换</th></tr>${tableRows}</table></div>`; document.getElementById('btnBackGift').addEventListener('click', ()=>{ currentGiftSeries = null; renderGiftHome(); }); bindAction('[data-action="exchange"]', async (e,btn)=>{ const bookId = btn.dataset.id; const requiredCost = parseInt(btn.dataset.cost); if(userFcoin < requiredCost) return alert('F币不足'); if(!confirm(`确定消耗 ${requiredCost} F币兑换此书吗？`)) return; try { const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single(); const newCoin = (user.fcoin||0) - requiredCost; if(newCoin < 0) return alert('F币不足'); const { error: fcoinError } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', currentUser.username); if(fcoinError) { alert('扣除F币失败'); return; } const book = getBookById(bookId); await supabase.from('messages').insert({ recipient: 'admin', sender: currentUser?.displayName||currentUser.username||'读者', content: `📦 兑换申请：用户 ${currentUser.username} 兑换了《${book?.title||'未知'}》（赠品等级 ${book?.grade||'未知'}），已扣除 ${requiredCost} F币。请前往管理端手动调整书籍状态。` }); await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'exchange', status: 'pending_admin', request_time: new Date().toISOString(), read: false }); await refreshAllData(); alert('兑换成功！已扣除F币，请等待管理员确认。'); renderGiftHome(); } catch(e) { alert('操作失败'); } }); }
-    function renderAboutPage() { readerContainer.innerHTML = `<div class="content-header"><h2>📖 关于我们</h2><button class="btn-admin-outline" id="btnBackAbout">← 返回</button></div><div style="line-height:1.8;"><p><strong>制作：</strong>星耀铁</p><p><strong>总监：</strong>梦语</p><p><strong>合作方：</strong>梦语、乐音恒</p><p><strong>合作工作室：</strong>梦语工作室、Lyinh工作室、米斯工作室</p><p><strong>感谢支持：</strong>周贤宇、梦语、Lyinh</p><hr><p><strong>注：</strong><br>星耀铁：米斯工作室<br>梦语：梦语工作室<br>乐音恒：乐音工作室</p><p><strong>星耀铁+梦语+乐音恒联合为：Lyinh工作室</strong></p><p><strong>Lyinh：</strong>乐游网（乐）、校园网（星）、棋艺网（梦）、仿易游戏（星）Lyinh书城（乐、星、梦）</p></div>`; siteFooter.style.display = 'none'; document.getElementById('btnBackAbout').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); }); }
+    async function loadMails() {
+        if(!currentUser) return;
+        const {data} = await supabase.from('messages').select('*').eq('recipient', currentUser.username).order('created_at', {ascending: false});
+        let html = '';
+        if(data && data.length>0) {
+            data.forEach(m => { html += `<div style="background:#f8f9fb;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid var(--deep-blue);"><p style="font-weight:600;">${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small><button class="btn-sm btn-reject del-mail-btn" data-id="${m.id}" style="margin-left:8px;">删除</button></div>`; });
+        } else html = '<p>暂无邮件</p>';
+        document.getElementById('mailList').innerHTML = html;
+        bindAction('.del-mail-btn', async (e, btn) => { if(confirm('删除此邮件？')) { await supabase.from('messages').delete().eq('id', btn.dataset.id); loadMails(); } });
+        await supabase.from('messages').update({ read: true }).eq('recipient', currentUser.username).eq('read', false);
+        updateMailDot();
+    }
+
+    function renderProfilePage() {
+        readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>`;
+        supabase.from('app_users').select('display_name').eq('username', currentUser.username).single().then(({data})=>{
+            const displayName = data?.display_name || currentUser.username;
+            let html = `<div class="profile-info" style="background:#f9fafc;border-radius:12px;padding:20px;margin-bottom:24px;"><h3>${displayName}</h3><p>用户名：${currentUser.username}</p><p>F币余额：${userFcoin}</p></div>`;
+            html += `<button class="btn-login" id="btnBorrowHistory">📖 借阅记录</button>`;
+            html += `<div id="historyArea" class="mt-16"></div>`;
+            readerContainer.innerHTML = `<div class="content-header"><h2>👤 我的</h2><button class="btn-admin-outline" id="btnBackProfile">← 返回</button></div>` + html;
+            document.getElementById('btnBackProfile').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
+            document.getElementById('btnBorrowHistory').addEventListener('click', showBorrowHistory);
+        });
+    }
+
+    async function showBorrowHistory() {
+        const {data: history} = await supabase.from('reservations').select('*, books(title)').eq('username', currentUser.username).order('request_time', {ascending: false});
+        let html = '<h3>📖 借阅/候书记录</h3>';
+        if (history && history.length > 0) {
+            html += '<div class="table-wrap"><table><tr><th>书名</th><th>类型</th><th>状态</th><th>时间</th></tr>';
+            history.forEach(r => { html += `<tr><td>${r.books?.title||'未知'}</td><td>${r.type==='borrow'?'借阅':(r.type==='wait'?'候书':'其他')}</td><td>${r.status}</td><td>${new Date(r.request_time).toLocaleString()}</td></tr>`; });
+            html += '</table></div>';
+        } else html += '<p>暂无记录</p>';
+        document.getElementById('historyArea').innerHTML = html;
+    }
+
+    function showFeedbackForm() {
+        const now = Date.now();
+        if(now - lastFeedbackTime < 3600000) { alert('请等待1小时后再反馈'); return; }
+        const html = `<h3>提交反馈</h3><textarea id="feedbackContent" rows="4" class="form-input" style="width:100%;margin:12px 0;" placeholder="请输入您的反馈..."></textarea><button class="btn-login" id="btnSubmitFeedback">提交</button><button class="btn-admin-outline mt-12" id="btnCancelFeedback">取消</button>`;
+        showGeneralModal(html);
+        document.getElementById('btnCancelFeedback').addEventListener('click', ()=> hideOverlay(generalOverlay));
+        document.getElementById('btnSubmitFeedback').addEventListener('click', async ()=>{
+            const content = document.getElementById('feedbackContent').value.trim();
+            if(!content) return alert('内容不能为空');
+            await supabase.from('feedbacks').insert({ username: currentUser.username, content });
+            lastFeedbackTime = Date.now();
+            hideOverlay(generalOverlay);
+            alert('反馈已提交');
+        });
+    }
+
+    function showGiftDetail(seriesName, grade, cost) {
+        currentGiftSeries = { seriesName, grade, cost };
+        const seriesBooks = booksData.filter(b => b.series === seriesName && b.grade === grade).sort((a,b)=>(parseInt(a.title.match(/\d+$/)?.[0]||0) - (parseInt(b.title.match(/\d+$/)?.[0]||0))));
+        const firstBook = seriesBooks[0]; const author = firstBook?.author || ''; const notes = firstBook?.notes || '';
+        let tableRows = '';
+        seriesBooks.forEach(book => {
+            const bookState = book.state || 'normal'; let statusText, btnHTML;
+            if (bookState === 'sent') { statusText = '已送出'; btnHTML = `<button class="btn-detail disabled">已送出</button>`; }
+            else if (bookState === 'unavailable') { statusText = '不可兑换'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; }
+            else if (bookState === 'upcoming') { statusText = '即将上架'; btnHTML = `<button class="btn-detail disabled">不可兑换</button>`; }
+            else { const canExchange = book.status === 'free'; statusText = canExchange ? '可兑换' : '不可兑换'; btnHTML = canExchange ? `<button class="btn-detail" data-action="exchange" data-id="${book.id}" data-cost="${cost}">兑换</button>` : `<button class="btn-detail disabled">不可兑换</button>`; }
+            tableRows += `<tr><td>${book.title}</td><td>${statusText}</td><td>${btnHTML}</td></tr>`;
+        });
+        readerContainer.innerHTML = `<div class="content-header"><h2>🎁 ${seriesName}</h2><button class="btn-admin-outline" id="btnBackGift">← 返回</button></div>${author ? `<p>作者：${author}</p>`:''}${notes ? `<p>注意事项：${notes}</p>`:''}<div class="table-wrap"><table><tr><th>书本</th><th>状态</th><th>兑换</th></tr>${tableRows}</table></div>`;
+        document.getElementById('btnBackGift').addEventListener('click', ()=>{ currentGiftSeries = null; renderGiftHome(); });
+        bindAction('[data-action="exchange"]', async (e,btn)=>{
+            const bookId = btn.dataset.id; const requiredCost = parseInt(btn.dataset.cost);
+            if(userFcoin < requiredCost) return alert('F币不足');
+            if(!confirm(`确定消耗 ${requiredCost} F币兑换此书吗？`)) return;
+            const { data: user } = await supabase.from('app_users').select('fcoin').eq('username', currentUser.username).single();
+            const newCoin = (user.fcoin||0) - requiredCost;
+            if(newCoin < 0) return alert('F币不足');
+            const { error: fcoinError } = await supabase.from('app_users').update({ fcoin: newCoin }).eq('username', currentUser.username);
+            if(fcoinError) { alert('扣除F币失败'); return; }
+            const book = getBookById(bookId);
+            await supabase.from('messages').insert({ recipient: 'admin', sender: currentUser?.displayName||currentUser.username||'读者', content: `📦 兑换申请：用户 ${currentUser.username} 兑换了《${book?.title||'未知'}》（赠品等级 ${book?.grade||'未知'}），已扣除 ${requiredCost} F币。请前往管理端手动调整书籍状态。` });
+            await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'exchange', status: 'pending_admin', request_time: new Date().toISOString(), read: false });
+            await refreshAllData();
+            showGeneralModal('✅ 兑换申请已提交，请等待管理员确认。');
+            renderGiftHome();
+        });
+    }
+
+    function renderAboutPage() {
+        readerContainer.innerHTML = `<div class="content-header"><h2>📖 关于我们</h2><button class="btn-admin-outline" id="btnBackAbout">← 返回</button></div><div style="line-height:1.8;"><p><strong>制作：</strong>星耀铁</p><p><strong>总监：</strong>梦语</p><p><strong>合作方：</strong>梦语、乐音恒</p><p><strong>合作工作室：</strong>梦语工作室、Lyinh工作室、米斯工作室</p><p><strong>感谢支持：</strong>周贤宇、梦语、Lyinh</p><hr><p><strong>注：</strong><br>星耀铁：米斯工作室<br>梦语：梦语工作室<br>乐音恒：乐音工作室</p><p><strong>星耀铁+梦语+乐音恒联合为：Lyinh工作室</strong></p><p><strong>Lyinh：</strong>乐游网（乐）、校园网（星）、棋艺网（梦）、仿易游戏（星）Lyinh书城（乐、星、梦）</p></div>`;
+        siteFooter.style.display = 'none';
+        document.getElementById('btnBackAbout').addEventListener('click', ()=>{ readerTab='collection'; renderCollectionHome(); });
+    }
 
     // ========== 读者端核心借阅逻辑 ==========
     function showSeriesDetail(seriesName, grade) {
@@ -479,15 +586,110 @@
         bindAction('[data-action="cancelWait"]', (e,btn)=> handleCancelWait(btn.dataset.id));
         bindAction('.red-dot', ()=> showNotifications());
     }
-    function borrowBook(bookId) { if (isSubmittingBorrow) { alert('请求正在处理中，请勿重复点击'); return; } const book = getBookById(bookId); if (!book || !canBorrow(bookId)) { alert('您已提交过借阅申请，或您正在借阅此书'); return; } const price = getPriceInfo(book.grade); const displayFiveDay = price.fiveDay==='免费'?'免费':price.fiveDay; const displayShort = price.short==='免费'?'免费':price.short; readerContainer.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:3em;">💳</div><h3>请用微信搜索：yyh20130917</h3><p>添加后备注来意并支付相关金额</p><div style="display:flex;gap:12px;justify-content:center;"><button class="btn-login" id="btnPlan5">5天款 (${displayFiveDay})</button><button class="btn-login" id="btnPlanShort">1天/3天款 (${displayShort})</button></div><button class="btn-admin-outline mt-12" id="btnCancelBorrow">取消</button></div>`; document.getElementById('btnCancelBorrow').addEventListener('click', ()=> { isSubmittingBorrow = false; showSeriesDetail(book.series, book.grade); }); document.getElementById('btnPlan5').addEventListener('click', () => submitBorrowRequest(book, '5days')); document.getElementById('btnPlanShort').addEventListener('click', () => submitBorrowRequest(book, 'short')); }
-    async function submitBorrowRequest(book, borrowType) { if (isSubmittingBorrow) return; isSubmittingBorrow = true; if (!canBorrow(book.id)) { alert('您已提交过借阅申请'); isSubmittingBorrow = false; return; } try { const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'borrow', status: 'pending_review', request_time: new Date().toISOString(), borrow_type: borrowType, read: false }); if (!error) { await supabase.from('books').update({ status: 'pending_review' }).eq('id', book.id); await refreshAllData(); renderCollectionHome(); } else alert('提交失败'); } catch(e) { alert('网络错误'); } isSubmittingBorrow = false; }
-    function canBorrow(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state && book.state !== 'normal') return false; if (book.status === 'free') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review'); }
-    function canWait(bookId) { if (!currentUser) return false; const book = getBookById(bookId); if (!book) return false; if (book.state === 'external') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); if (book.status !== 'borrowed') return false; if (book.current_borrower === currentUser.username) return false; return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting'); }
-    async function handleWaitBook(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; if (!canWait(bookId)) { const book = getBookById(bookId); if (book && book.state === 'external' && reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting')) { alert('您已候过此书'); } else { alert('无法候书'); } return; } const book = getBookById(bookId); try { const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'wait', status: 'waiting', request_time: new Date().toISOString(), read: false }); if (!error) { await refreshAllData(); showSeriesDetail(book.series, book.grade); } else alert('操作失败'); } catch(e) { alert('网络错误'); } }
-    async function handleCancelWait(bookId) { const now = Date.now(); if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; } lastWaitActionTime = now; const myRes = getMyReservation(bookId); if (myRes && myRes.status === 'waiting') { try { await supabase.from('reservations').update({ status: 'cancelled' }).eq('id', myRes.id); await refreshAllData(); const book = getBookById(bookId); showSeriesDetail(book.series, book.grade); } catch(e) { alert('操作失败'); } } }
-    function showNotifications() { const notifs = getMyNotifications(); if (!notifs.length) { alert('暂无新通知'); return; } let html = '<h3 style="color:var(--deep-blue);">📬 通知</h3>'; notifs.forEach(n => { const book = getBookById(n.book_id); const title = book ? book.title : '未知'; if (n.status === 'approved') html += `<div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>✅ ${title}</strong><br>已通过审理<br>${n.return_time ? '应归还时间：'+new Date(n.return_time).toLocaleDateString() : ''}</div>`; else if (n.status === 'rejected') html += `<div style="background:#fdecea;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>❌ ${title}</strong><br>已被拒绝<br>原因：${n.reject_reason||'未说明'}</div>`; }); html += `<button class="btn-login mt-12" id="btnMarkAllRead">全部标为已读</button>`; showGeneralModal(html); document.getElementById('btnMarkAllRead').addEventListener('click', async ()=>{ try { for (const n of notifs) await supabase.from('reservations').update({ read: true }).eq('id', n.id); await refreshAllData(); hideOverlay(generalOverlay); renderCollectionHome(); } catch(e) { alert('操作失败'); } }); }
-    function showGeneralModal(innerHTML, maxWidth = '500px') { generalCard.innerHTML = innerHTML + `<div style="text-align:center;margin-top:16px;"><button class="btn-admin-outline" id="btnCloseGeneral">关闭</button></div>`; generalCard.style.maxWidth = maxWidth; generalOverlay.classList.add('show'); document.getElementById('btnCloseGeneral').addEventListener('click', () => { generalOverlay.classList.remove('show'); generalCard.style.maxWidth = '500px'; }); }
+
+    function borrowBook(bookId) {
+        if (isSubmittingBorrow) { alert('请求正在处理中，请勿重复点击'); return; }
+        const book = getBookById(bookId);
+        if (!book || !canBorrow(bookId)) { alert('您已提交过借阅申请，或您正在借阅此书'); return; }
+        const price = getPriceInfo(book.grade);
+        const displayFiveDay = price.fiveDay==='免费'?'免费':price.fiveDay;
+        const displayShort = price.short==='免费'?'免费':price.short;
+        readerContainer.innerHTML = `<div style="text-align:center;padding:30px;"><div style="font-size:3em;">💳</div><h3>请用微信搜索：yyh20130917</h3><p>添加后备注来意并支付相关金额</p><div style="display:flex;gap:12px;justify-content:center;"><button class="btn-login" id="btnPlan5">5天款 (${displayFiveDay})</button><button class="btn-login" id="btnPlanShort">1天/3天款 (${displayShort})</button></div><button class="btn-admin-outline mt-12" id="btnCancelBorrow">取消</button></div>`;
+        document.getElementById('btnCancelBorrow').addEventListener('click', ()=> { isSubmittingBorrow = false; showSeriesDetail(book.series, book.grade); });
+        document.getElementById('btnPlan5').addEventListener('click', () => submitBorrowRequest(book, '5days'));
+        document.getElementById('btnPlanShort').addEventListener('click', () => submitBorrowRequest(book, 'short'));
+    }
+
+    async function submitBorrowRequest(book, borrowType) {
+        if (isSubmittingBorrow) return;
+        isSubmittingBorrow = true;
+        if (!canBorrow(book.id)) { alert('您已提交过借阅申请'); isSubmittingBorrow = false; return; }
+        try {
+            const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'borrow', status: 'pending_review', request_time: new Date().toISOString(), borrow_type: borrowType, read: false });
+            if (!error) {
+                await supabase.from('books').update({ status: 'pending_review' }).eq('id', book.id);
+                await refreshAllData();
+                showGeneralModal('✅ 借阅申请已提交，请等待管理员审理。');
+            } else alert('提交失败');
+        } catch(e) { alert('网络错误'); }
+        isSubmittingBorrow = false;
+    }
+
+    function canBorrow(bookId) {
+        if (!currentUser) return false;
+        const book = getBookById(bookId);
+        if (!book) return false;
+        if (book.state && book.state !== 'normal') return false;
+        if (book.status === 'free') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review');
+        if (book.current_borrower === currentUser.username) return false;
+        return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'pending_review');
+    }
+
+    function canWait(bookId) {
+        if (!currentUser) return false;
+        const book = getBookById(bookId);
+        if (!book) return false;
+        if (book.state === 'external') return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting');
+        if (book.status !== 'borrowed') return false;
+        if (book.current_borrower === currentUser.username) return false;
+        return !reservationsData.some(r => r.book_id == bookId && r.username === currentUser.username && r.status === 'waiting');
+    }
+
+    async function handleWaitBook(bookId) {
+        const now = Date.now();
+        if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; }
+        lastWaitActionTime = now;
+        if (!canWait(bookId)) { alert('无法候书'); return; }
+        const book = getBookById(bookId);
+        try {
+            const { error } = await supabase.from('reservations').insert({ book_id: book.id, username: currentUser.username, type: 'wait', status: 'waiting', request_time: new Date().toISOString(), read: false });
+            if (!error) { await refreshAllData(); showGeneralModal('✅ 候书申请已提交，当书籍归还后会自动通知您。'); }
+            else alert('操作失败');
+        } catch(e) { alert('网络错误'); }
+    }
+
+    async function handleCancelWait(bookId) {
+        const now = Date.now();
+        if (now - lastWaitActionTime < 10000) { alert('请等待10秒后再操作'); return; }
+        lastWaitActionTime = now;
+        const myRes = getMyReservation(bookId);
+        if (myRes && myRes.status === 'waiting') {
+            await supabase.from('reservations').update({ status: 'cancelled' }).eq('id', myRes.id);
+            await refreshAllData();
+            const book = getBookById(bookId);
+            showSeriesDetail(book.series, book.grade);
+        }
+    }
+
+    function showNotifications() {
+        const notifs = getMyNotifications();
+        if (!notifs.length) { alert('暂无新通知'); return; }
+        let html = '<h3 style="color:var(--deep-blue);">📬 通知</h3>';
+        notifs.forEach(n => {
+            const book = getBookById(n.book_id);
+            const title = book ? book.title : '未知';
+            if (n.status === 'approved') html += `<div style="background:#e8f5e9;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>✅ ${title}</strong><br>已通过审理<br>${n.return_time ? '应归还时间：'+new Date(n.return_time).toLocaleDateString() : ''}</div>`;
+            else if (n.status === 'rejected') html += `<div style="background:#fdecea;padding:12px;border-radius:8px;margin-bottom:8px;"><strong>❌ ${title}</strong><br>已被拒绝<br>原因：${n.reject_reason||'未说明'}</div>`;
+        });
+        html += `<button class="btn-login mt-12" id="btnMarkAllRead">全部标为已读</button>`;
+        showGeneralModal(html);
+        document.getElementById('btnMarkAllRead').addEventListener('click', async ()=>{
+            for (const n of notifs) await supabase.from('reservations').update({ read: true }).eq('id', n.id);
+            await refreshAllData();
+            hideOverlay(generalOverlay);
+            renderCollectionHome();
+        });
+    }
+
+    function showGeneralModal(innerHTML, maxWidth = '500px') {
+        generalCard.innerHTML = `<div style="text-align:center;">${innerHTML}</div><div style="text-align:center;margin-top:16px;"><button class="btn-admin-outline" id="btnCloseGeneral">关闭</button></div>`;
+        generalCard.style.maxWidth = maxWidth;
+        generalOverlay.classList.add('show');
+        document.getElementById('btnCloseGeneral').addEventListener('click', () => { generalOverlay.classList.remove('show'); generalCard.style.maxWidth = '500px'; });
+    }
     function hideOverlay(el) { el.classList.remove('show'); }
+
+// ========== 第二部分 紧接第一部分末尾 ==========
 
     // ========== 管理端面板 ==========
     function renderAdminPanel() {
@@ -504,6 +706,7 @@
                 <button class="btn-login admin-tab-btn" style="width:auto;" data-page="pricing">💰 定价</button>
                 <button class="btn-login admin-tab-btn" style="width:auto;" data-page="mailbox">📬 邮箱</button>
                 <button class="btn-login admin-tab-btn" style="width:auto;" data-page="status">🚦 书城状态</button>
+                <button class="btn-login admin-tab-btn" style="width:auto;" data-page="loginHistory">🕒 登录历史</button>
             </div>
             <div id="editPanel" style="display:block; margin-top:16px;">
                 <h3>📢 弹窗公告（登录后弹出）</h3>
@@ -527,39 +730,85 @@
 
         // 编辑公告
         document.querySelector('.admin-tab-btn[data-page="edit"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'block'; document.getElementById('adminSubContent').innerHTML = ''; document.getElementById('announceHistoryArea').innerHTML = ''; });
+        // 防重复保存弹窗公告
         document.getElementById('btnSavePopupAnnouncement').addEventListener('click', async ()=>{
+            if (isSavingAnnouncement) return;
+            isSavingAnnouncement = true;
             const content = document.getElementById('adminPopupAnnouncementInput').value;
-            if(!content.trim()) return alert('弹窗公告不能为空');
-            try { await supabase.from('announcement_history').insert({ content, type: 'popup' }); await supabase.from('announcements').upsert({ id:1, content }); popupAnnouncementContent = content; updatePopupAnnouncementUI(); alert('弹窗公告已更新'); } catch(e) { alert('操作失败'); }
+            if(!content.trim()) { alert('弹窗公告不能为空'); isSavingAnnouncement = false; return; }
+            try {
+                await supabase.from('announcement_history').insert({ content, type: 'popup' });
+                await supabase.from('announcements').upsert({ id:1, content });
+                popupAnnouncementContent = content;
+                updatePopupAnnouncementUI();
+                alert('弹窗公告已更新');
+            } catch(e) { alert('操作失败'); }
+            isSavingAnnouncement = false;
         });
+        // 防重复保存滚动公告
         document.getElementById('btnSaveScrollAnnouncement').addEventListener('click', async ()=>{
+            if (isSavingAnnouncement) return;
+            isSavingAnnouncement = true;
             const content = document.getElementById('adminScrollAnnouncementInput').value;
-            if(!content.trim()) return alert('滚动公告不能为空');
-            try { await supabase.from('announcement_history').insert({ content, type: 'scroll' }); await supabase.from('announcements').upsert({ id:2, content }); scrollAnnouncementContent = content; updateScrollAnnouncementUI(); alert('滚动公告已更新'); } catch(e) { alert('操作失败'); }
+            if(!content.trim()) { alert('滚动公告不能为空'); isSavingAnnouncement = false; return; }
+            try {
+                await supabase.from('announcement_history').insert({ content, type: 'scroll' });
+                await supabase.from('announcements').upsert({ id:2, content });
+                scrollAnnouncementContent = content;
+                updateScrollAnnouncementUI();
+                alert('滚动公告已更新');
+            } catch(e) { alert('操作失败'); }
+            isSavingAnnouncement = false;
         });
+        // 防重复保存登录公告
         document.getElementById('btnSaveLoginAnnouncement').addEventListener('click', async ()=>{
+            if (isSavingAnnouncement) return;
+            isSavingAnnouncement = true;
             const content = document.getElementById('adminLoginAnnouncementInput').value;
-            if(!content.trim()) return alert('登录公告不能为空');
-            try { await supabase.from('announcement_history').insert({ content, type: 'login' }); await supabase.from('announcements').upsert({ id:3, content }); loginAnnouncementContent = content; updateLoginScroll(); alert('登录公告已更新'); } catch(e) { alert('操作失败'); }
+            if(!content.trim()) { alert('登录公告不能为空'); isSavingAnnouncement = false; return; }
+            try {
+                await supabase.from('announcement_history').insert({ content, type: 'login' });
+                await supabase.from('announcements').upsert({ id:3, content });
+                loginAnnouncementContent = content;
+                updateLoginScroll();
+                alert('登录公告已更新');
+            } catch(e) { alert('操作失败'); }
+            isSavingAnnouncement = false;
         });
         document.getElementById('btnAnnounceHistory').addEventListener('click', renderAnnouncementHistory);
 
-        // 其他标签页绑定保持不变
+        // 借阅审理
         document.querySelector('.admin-tab-btn[data-page="review"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderReviewApps(); });
+        // 书籍管理
         document.querySelector('.admin-tab-btn[data-page="manage"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderManageBooks(); });
+        // 编辑书籍
         document.querySelector('.admin-tab-btn[data-page="editBooks"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderEditBooks(); });
+        // 赠品管理
         document.querySelector('.admin-tab-btn[data-page="editGifts"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderEditGifts(); });
+        // 用户管理
         document.querySelector('.admin-tab-btn[data-page="users"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderUserManage(); });
+        // 反馈管理
         document.querySelector('.admin-tab-btn[data-page="feedback"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderFeedbackManage(); });
+        // 送信
         document.querySelector('.admin-tab-btn[data-page="sendMsg"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderSendMessage(); });
+        // 定价
         document.querySelector('.admin-tab-btn[data-page="pricing"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderPricing(); });
+        // 邮箱
         document.querySelector('.admin-tab-btn[data-page="mailbox"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderAdminMailbox(); });
+        // 书城状态
         document.querySelector('.admin-tab-btn[data-page="status"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderSiteStatus(); });
+        // 登录历史
+        document.querySelector('.admin-tab-btn[data-page="loginHistory"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'none'; renderLoginHistory(); });
     }
 
     // ===================== 公告历史 =====================
     async function renderAnnouncementHistory() {
-        try { const { data } = await supabase.from('announcement_history').select('*').order('changed_at', { ascending: false }); let html = '<h4>📜 公告修改记录</h4>'; if (!data || data.length === 0) html += '<p>暂无记录</p>'; else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => { html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.type==='popup'?'弹窗':h.type==='scroll'?'滚动':'登录'}</td><td style="white-space:pre-wrap;">${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`; }); html += '</table></div>'; } document.getElementById('announceHistoryArea').innerHTML = html; bindAction('.del-announce-btn', async (e, btn) => { if(confirm('删除此条记录？')) { await supabase.from('announcement_history').delete().eq('id', btn.dataset.id); renderAnnouncementHistory(); } }); } catch(e) { console.error(e); }
+        const { data } = await supabase.from('announcement_history').select('*').order('changed_at', { ascending: false });
+        let html = '<h4>📜 公告修改记录</h4>';
+        if (!data || data.length === 0) html += '<p>暂无记录</p>';
+        else { html += '<div class="table-wrap"><table><tr><th>时间</th><th>类型</th><th>内容</th><th>操作</th></tr>'; data.forEach(h => { html += `<tr><td>${new Date(h.changed_at).toLocaleString()}</td><td>${h.type==='popup'?'弹窗':h.type==='scroll'?'滚动':'登录'}</td><td style="white-space:pre-wrap;">${h.content}</td><td><button class="btn-sm btn-reject del-announce-btn" data-id="${h.id}">删除</button></td></tr>`; }); html += '</table></div>'; }
+        document.getElementById('announceHistoryArea').innerHTML = html;
+        bindAction('.del-announce-btn', async (e, btn) => { if(confirm('删除此条记录？')) { await supabase.from('announcement_history').delete().eq('id', btn.dataset.id); renderAnnouncementHistory(); } });
     }
 
     // ===================== 借阅审理 =====================
@@ -582,14 +831,29 @@
         if(!returnDate) return;
         const dateObj = new Date(returnDate + 'T23:59:59');
         if(isNaN(dateObj.getTime())) { alert('日期格式无效'); return; }
-        try { const { error } = await supabase.from('reservations').update({ status:'approved', return_time: dateObj.toISOString(), read:false }).eq('id', resId); if(error) { alert('操作失败：'+error.message); return; } await supabase.from('books').update({ status:'borrowed', current_borrower: app.username }).eq('id', app.book_id); await supabase.from('reservations').update({ status:'cancelled' }).eq('book_id', app.book_id).eq('username', app.username).eq('status','waiting'); const book = getBookById(app.book_id); await supabase.from('messages').insert({ recipient: app.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的借阅申请《${book?.title||'未知'}》已通过审理，请于${returnDate}前归还。` }); await refreshAllData(); renderReviewApps(); updateUI(); } catch(e) { alert('操作失败'); }
+        try {
+            const { error } = await supabase.from('reservations').update({ status:'approved', return_time: dateObj.toISOString(), read:false }).eq('id', resId);
+            if(error) { alert('操作失败：'+error.message); return; }
+            await supabase.from('books').update({ status:'borrowed', current_borrower: app.username }).eq('id', app.book_id);
+            await supabase.from('reservations').update({ status:'cancelled' }).eq('book_id', app.book_id).eq('username', app.username).eq('status','waiting');
+            const book = getBookById(app.book_id);
+            await supabase.from('messages').insert({ recipient: app.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的借阅申请《${book?.title||'未知'}》已通过审理，请于${returnDate}前归还。` });
+            await refreshAllData(); renderReviewApps(); updateUI();
+        } catch(e) { alert('操作失败'); }
     }
 
     async function rejectApp(resId) {
         const reason = prompt('请输入拒绝原因：');
         if(!reason) return;
         const app = reservationsData.find(r => r.id == resId);
-        try { const { error } = await supabase.from('reservations').update({ status:'rejected', reject_reason:reason, read:false }).eq('id', resId); if(error) { alert('操作失败：'+error.message); return; } if(app) { const other = reservationsData.filter(r => r.book_id==app.book_id && r.status==='pending_review' && r.id!=resId); if(!other.length) await supabase.from('books').update({ status:'free', current_borrower:null }).eq('id', app.book_id); } const book = getBookById(app.book_id); await supabase.from('messages').insert({ recipient: app.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的借阅申请《${book?.title||'未知'}》已被拒绝，原因：${reason}` }); await refreshAllData(); renderReviewApps(); updateUI(); } catch(e) { alert('操作失败'); }
+        try {
+            const { error } = await supabase.from('reservations').update({ status:'rejected', reject_reason:reason, read:false }).eq('id', resId);
+            if(error) { alert('操作失败：'+error.message); return; }
+            if(app) { const other = reservationsData.filter(r => r.book_id==app.book_id && r.status==='pending_review' && r.id!=resId); if(!other.length) await supabase.from('books').update({ status:'free', current_borrower:null }).eq('id', app.book_id); }
+            const book = getBookById(app.book_id);
+            await supabase.from('messages').insert({ recipient: app.username, sender: currentUser?.displayName || currentUser?.username || 'admin', content: `您的借阅申请《${book?.title||'未知'}》已被拒绝，原因：${reason}` });
+            await refreshAllData(); renderReviewApps(); updateUI();
+        } catch(e) { alert('操作失败'); }
     }
 
     function renderReviewHistory() {
@@ -870,14 +1134,87 @@
         supabase.from('pricing').select('*').eq('id', priceId).single().then(({ data }) => { if (!data) return; const html = `<h3>编辑价格</h3><div><label>价格：<input id="editPriceValue" class="form-input" value="${data.price}"></label></div><div><label><input type="checkbox" id="editPriceFree" ${data.is_free ? 'checked' : ''}> 免费</label></div><button class="btn-login mt-12" id="btnUpdatePrice">更新</button><button class="btn-admin-outline mt-12" id="btnCancelEditPrice">取消</button>`; showGeneralModal(html); document.getElementById('btnCancelEditPrice').addEventListener('click', () => hideOverlay(generalOverlay)); document.getElementById('btnUpdatePrice').addEventListener('click', async () => { const isFree = document.getElementById('editPriceFree').checked; const price = isFree ? '免费' : document.getElementById('editPriceValue').value.trim(); if (!isFree && !price) return alert('请输入价格'); try { await supabase.from('pricing').update({ price, is_free: isFree }).eq('id', priceId); await refreshAllData(); hideOverlay(generalOverlay); renderPricing(); } catch(e) { alert('更新失败'); } }); });
     }
 
-    // ===================== 管理端邮箱 =====================
+    // ===================== 管理端邮箱（含历史功能） =====================
     async function renderAdminMailbox() {
-        try { const { data } = await supabase.from('messages').select('*').eq('recipient', 'admin').order('created_at', { ascending: false }); let html = '<h3>📬 管理员邮箱</h3>'; if (!data || data.length === 0) html += '<p>暂无邮件</p>'; else { data.forEach(m => { html += `<div style="background:#f8f9fb;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid var(--deep-blue);"><p style="font-weight:600;">发件人：${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small><button class="btn-sm btn-reject del-admin-mail-btn" data-id="${m.id}" style="margin-left:8px;">删除</button></div>`; }); } document.getElementById('adminSubContent').innerHTML = html; bindAction('.del-admin-mail-btn', async (e, btn) => { if (confirm('确定删除此邮件？')) { await supabase.from('messages').delete().eq('id', btn.dataset.id); renderAdminMailbox(); } }); } catch(e) { console.error(e); }
+        try {
+            // 未读邮件（尚未 admin_read）
+            const { data: unread } = await supabase.from('messages').select('*').eq('recipient', 'admin').eq('admin_read', false).order('created_at', { ascending: false });
+            let html = '<h3>📬 管理员邮箱</h3>';
+            if (unread && unread.length > 0) {
+                html += '<h4>新邮件</h4>';
+                unread.forEach(m => { html += `<div style="background:#f0f4ff;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid var(--deep-blue);"><p style="font-weight:600;">发件人：${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small><button class="btn-sm btn-reject del-admin-mail-btn" data-id="${m.id}" style="margin-left:8px;">删除</button></div>`; });
+            } else html += '<p>暂无新邮件</p>';
+            html += `<button class="btn-admin-outline mt-12" id="btnAdminMailHistory">📜 已读邮件历史</button><div id="adminMailHistoryArea" class="mt-16"></div>`;
+            document.getElementById('adminSubContent').innerHTML = html;
+            bindAction('.del-admin-mail-btn', async (e, btn) => { if (confirm('确定删除此邮件？')) { await supabase.from('messages').delete().eq('id', btn.dataset.id); renderAdminMailbox(); } });
+            document.getElementById('btnAdminMailHistory').addEventListener('click', async () => {
+                const { data: history } = await supabase.from('messages').select('*').eq('recipient', 'admin').eq('admin_read', true).order('created_at', { ascending: false });
+                let historyHtml = '<h4>已读邮件历史</h4>';
+                if (history && history.length > 0) {
+                    history.forEach(m => { historyHtml += `<div style="background:#f8f9fb;padding:12px;border-radius:8px;margin-bottom:8px;border-left:4px solid #888;"><p style="font-weight:600;">发件人：${m.sender}</p><p>${m.content}</p><small>${new Date(m.created_at).toLocaleString()}</small></div>`; });
+                } else historyHtml += '<p>暂无已读邮件</p>';
+                document.getElementById('adminMailHistoryArea').innerHTML = historyHtml;
+            });
+            // 标记所有未读邮件为已读
+            if (unread && unread.length > 0) {
+                const ids = unread.map(m => m.id);
+                await supabase.from('messages').update({ admin_read: true }).in('id', ids);
+            }
+        } catch(e) { console.error(e); }
     }
 
-    // ===================== 书城状态 =====================
+    // ===================== 书城状态（防重复点击 + 提示） =====================
+    let isChangingStatus = false;
     async function renderSiteStatus() {
-        try { const { data } = await supabase.from('site_status').select('status').single(); const current = data?.status || 'running'; const statuses = ['running', 'repair', 'maintenance', 'closed']; const labels = { running:'运行', repair:'维修', maintenance:'维护', closed:'停服' }; let html = '<h3>🚦 书城状态</h3><div style="display:flex; gap:12px; flex-wrap:wrap;">'; statuses.forEach(s => { html += `<button class="btn-login status-btn ${s === current ? 'active' : ''}" style="width:auto; background:${s==='running'?'#27ae60':s==='repair'?'#e67e22':s==='maintenance'?'#e67e22':'#c0392b'}" data-status="${s}">${labels[s]}</button>`; }); html += '</div>'; document.getElementById('adminSubContent').innerHTML = html; bindAction('.status-btn', async (e, btn) => { const newStatus = btn.dataset.status; await supabase.from('site_status').upsert({ id: 1, status: newStatus }); siteStatus = newStatus; updateLoginUIByStatus(); renderSiteStatus(); }); } catch(e) { console.error(e); }
+        try {
+            const { data } = await supabase.from('site_status').select('status').single();
+            const current = data?.status || 'running';
+            const statuses = ['running', 'updating', 'repair', 'maintenance', 'closed'];
+            const labels = { running:'运行', updating:'更新', repair:'维修', maintenance:'维护', closed:'停服' };
+            const colors = { running:'#27ae60', updating:'#27ae60', repair:'#e67e22', maintenance:'#e67e22', closed:'#c0392b' };
+            let html = '<h3>🚦 书城状态</h3><div style="display:flex; gap:12px; flex-wrap:wrap;">';
+            statuses.forEach(s => {
+                html += `<button class="btn-login status-btn ${s === current ? 'active' : ''}" style="width:auto; background:${colors[s]};" data-status="${s}">${labels[s]}</button>`;
+            });
+            html += '</div>';
+            document.getElementById('adminSubContent').innerHTML = html;
+            bindAction('.status-btn', async (e, btn) => {
+                if (isChangingStatus) return;
+                isChangingStatus = true;
+                const newStatus = btn.dataset.status;
+                try {
+                    await supabase.from('site_status').upsert({ id: 1, status: newStatus });
+                    siteStatus = newStatus;
+                    updateLoginUIByStatus();
+                    alert(`变换状态成功为：${labels[newStatus]}`);
+                    renderSiteStatus();
+                } catch(e) { alert('状态切换失败'); }
+                isChangingStatus = false;
+            });
+        } catch(e) { console.error(e); }
+    }
+
+    // ===================== 登录历史 =====================
+    async function renderLoginHistory() {
+        try {
+            const { data: logs } = await supabase.from('login_history').select('*').order('login_time', { ascending: false });
+            let html = '<h3>🕒 登录历史</h3>';
+            if (logs && logs.length > 0) {
+                html += '<div style="margin-bottom:12px;"><button class="btn-sm btn-reject" id="btnClearAllLoginHistory">🗑️ 清空全部记录</button></div>';
+                html += '<div class="table-wrap"><table><tr><th>用户名</th><th>登录时间</th><th>操作</th></tr>';
+                logs.forEach(l => { html += `<tr><td>${l.username}</td><td>${new Date(l.login_time).toLocaleString()}</td><td><button class="btn-sm btn-reject del-login-btn" data-id="${l.id}">删除</button></td></tr>`; });
+                html += '</table></div>';
+            } else html += '<p>暂无登录记录</p>';
+            document.getElementById('adminSubContent').innerHTML = html;
+            bindAction('.del-login-btn', async (e, btn) => { if(confirm('删除此记录？')) { await supabase.from('login_history').delete().eq('id', btn.dataset.id); renderLoginHistory(); } });
+            const clearBtn = document.getElementById('btnClearAllLoginHistory');
+            if (clearBtn) {
+                clearBtn.addEventListener('click', async () => {
+                    if(!confirm('确定要删除所有登录历史吗？此操作不可恢复！')) return;
+                    try { await supabase.from('login_history').delete().neq('id', 0); renderLoginHistory(); } catch(e) { alert('操作失败'); }
+                });
+            }
+        } catch(e) { console.error(e); }
     }
 
 })();
