@@ -357,7 +357,6 @@
             if (user.role === 'reader' && siteStatus !== 'running') {
                 loginStatusMsg.style.display = 'block'; btn.disabled = false; return;
             }
-            // 记录登录历史
             await supabase.from('login_history').insert({ username: user.username });
             handleLoginImmediate(user.username, user.role, user.display_name);
         } catch(err) { errorMsgEl.textContent='网络错误'; }
@@ -730,12 +729,11 @@
 
         // 编辑公告
         document.querySelector('.admin-tab-btn[data-page="edit"]').addEventListener('click', function() { setActiveTab(this); document.getElementById('editPanel').style.display = 'block'; document.getElementById('adminSubContent').innerHTML = ''; document.getElementById('announceHistoryArea').innerHTML = ''; });
-        // 防重复保存弹窗公告
+
+        // 保存弹窗公告（无防重复）
         document.getElementById('btnSavePopupAnnouncement').addEventListener('click', async ()=>{
-            if (isSavingAnnouncement) return;
-            isSavingAnnouncement = true;
             const content = document.getElementById('adminPopupAnnouncementInput').value;
-            if(!content.trim()) { alert('弹窗公告不能为空'); isSavingAnnouncement = false; return; }
+            if(!content.trim()) { alert('弹窗公告不能为空'); return; }
             try {
                 await supabase.from('announcement_history').insert({ content, type: 'popup' });
                 await supabase.from('announcements').upsert({ id:1, content });
@@ -743,14 +741,12 @@
                 updatePopupAnnouncementUI();
                 alert('弹窗公告已更新');
             } catch(e) { alert('操作失败'); }
-            isSavingAnnouncement = false;
         });
-        // 防重复保存滚动公告
+
+        // 保存滚动公告（无防重复）
         document.getElementById('btnSaveScrollAnnouncement').addEventListener('click', async ()=>{
-            if (isSavingAnnouncement) return;
-            isSavingAnnouncement = true;
             const content = document.getElementById('adminScrollAnnouncementInput').value;
-            if(!content.trim()) { alert('滚动公告不能为空'); isSavingAnnouncement = false; return; }
+            if(!content.trim()) { alert('滚动公告不能为空'); return; }
             try {
                 await supabase.from('announcement_history').insert({ content, type: 'scroll' });
                 await supabase.from('announcements').upsert({ id:2, content });
@@ -758,14 +754,12 @@
                 updateScrollAnnouncementUI();
                 alert('滚动公告已更新');
             } catch(e) { alert('操作失败'); }
-            isSavingAnnouncement = false;
         });
-        // 防重复保存登录公告
+
+        // 保存登录公告（无防重复）
         document.getElementById('btnSaveLoginAnnouncement').addEventListener('click', async ()=>{
-            if (isSavingAnnouncement) return;
-            isSavingAnnouncement = true;
             const content = document.getElementById('adminLoginAnnouncementInput').value;
-            if(!content.trim()) { alert('登录公告不能为空'); isSavingAnnouncement = false; return; }
+            if(!content.trim()) { alert('登录公告不能为空'); return; }
             try {
                 await supabase.from('announcement_history').insert({ content, type: 'login' });
                 await supabase.from('announcements').upsert({ id:3, content });
@@ -773,8 +767,8 @@
                 updateLoginScroll();
                 alert('登录公告已更新');
             } catch(e) { alert('操作失败'); }
-            isSavingAnnouncement = false;
         });
+
         document.getElementById('btnAnnounceHistory').addEventListener('click', renderAnnouncementHistory);
 
         // 借阅审理
@@ -1137,7 +1131,6 @@
     // ===================== 管理端邮箱（含历史功能） =====================
     async function renderAdminMailbox() {
         try {
-            // 未读邮件（尚未 admin_read）
             const { data: unread } = await supabase.from('messages').select('*').eq('recipient', 'admin').eq('admin_read', false).order('created_at', { ascending: false });
             let html = '<h3>📬 管理员邮箱</h3>';
             if (unread && unread.length > 0) {
@@ -1155,7 +1148,6 @@
                 } else historyHtml += '<p>暂无已读邮件</p>';
                 document.getElementById('adminMailHistoryArea').innerHTML = historyHtml;
             });
-            // 标记所有未读邮件为已读
             if (unread && unread.length > 0) {
                 const ids = unread.map(m => m.id);
                 await supabase.from('messages').update({ admin_read: true }).in('id', ids);
